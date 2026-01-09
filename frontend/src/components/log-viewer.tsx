@@ -1,12 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
-import { Search, Trash2, Loader2, ArrowUp } from 'lucide-react'
+import { Search, Trash2, Loader2 } from 'lucide-react'
 import { Input } from './ui/input'
 import { Button } from './ui/button'
 import { ScrollArea } from './ui/scroll-area'
 import { Badge } from './ui/badge'
 import { useAppLogsManager, type AppLogsState } from '@/hooks/useAppLogsManager'
-import type { LogEvent } from '@/lib/cloudwatch'
-import { formatDate } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
 interface LogViewerProps {
@@ -18,58 +16,60 @@ interface LogViewerProps {
 export default function LogViewer({ appName, appDisplayName, environment }: LogViewerProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [autoScroll, setAutoScroll] = useState(true)
-  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [initialLoadDone, setInitialLoadDone] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const previousLogCount = useRef(0)
-  const hasScrolledToTop = useRef(false)
 
-  const { initializeApp, getAppLogs, loadOlderLogs, clearAppLogs } = useAppLogsManager()
+  const { initializeApp, getAppLogs, clearAppLogs, clearAllPolling } = useAppLogsManager()
+
+  // Clear all polling when environment changes
+  useEffect(() => {
+    return () => {
+      clearAllPolling()
+    }
+  }, [environment, clearAllPolling])
 
   // Initialize app when component mounts or app changes
   useEffect(() => {
     initializeApp(appName, environment)
+    setInitialLoadDone(false)
   }, [appName, environment, initializeApp])
 
   // Get current log state
-  const logState: AppLogsState = getAppLogs(appName, environment) || {
-    logs: [],
-    loading: true,
-    error: null,
-    hasMore: true,
-    newestTimestamp: 0,
-    oldestTimestamp: 0,
-  }
+  const logState: AppLogsState = getAppLogs(appName, environment)
+
+  // Check if there are more streams to load in background
+  const hasMoreStreams = logState.streams.some((s, i) => i > 0 && !s.loaded)
+  const isLoadingOlder = logState.streams.some((s, i) => i > 0 && s.loading)
+
+  // Scroll to bottom when initial load completes
+  useEffect(() => {
+    if (!logState.loading && !initialLoadDone && logState.logs.length > 0) {
+      scrollRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+      setInitialLoadDone(true)
+    }
+  }, [logState.loading, initialLoadDone, logState.logs.length])
 
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
-    if (autoScroll && !logState.loading && logState.logs.length > previousLogCount.current) {
+    if (autoScroll && !logState.loading && logState.logs.length > previousLogCount.current && initialLoadDone) {
       scrollRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
     }
     previousLogCount.current = logState.logs.length
-  }, [logState.logs.length, autoScroll, logState.loading])
+  }, [logState.logs.length, autoScroll, logState.loading, initialLoadDone])
 
   // Toggle auto-scroll on user scroll
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.target as HTMLDivElement
     const scrollTop = target.scrollTop
     const isNearBottom = target.scrollHeight - scrollTop - target.clientHeight < 100
-    const isAtTop = scrollTop < 50
-
     setAutoScroll(isNearBottom)
-
-    // Load older logs when scrolling to top
-    if (isAtTop && logState.hasMore && !loadingOlder && !logState.loading && logState.logs.length > 0) {
-      hasScrolledToTop.current = true
-      setLoadingOlder(true)
-      loadOlderLogs(appName, environment).finally(() => setLoadingOlder(false))
-    }
   }
 
   // Client-side filter logs by search query
   const filteredLogs = logState.logs.filter((log) =>
-    log.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    log.stream.toLowerCase().includes(searchQuery.toLowerCase())
+    log.message.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
   return (
@@ -90,14 +90,20 @@ export default function LogViewer({ appName, appDisplayName, environment }: LogV
               Loading
             </Badge>
           )}
-          {logState.hasMore && !logState.loading && (
-            <Badge variant="outline" className="text-xs text-muted-foreground">
-              Scroll up for more
+          {isLoadingOlder && (
+            <Badge variant="outline" className="gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Loading older logs...
             </Badge>
           )}
-          {!logState.hasMore && logState.logs.length > 0 && (
+          {hasMoreStreams && !logState.loading && !isLoadingOlder && (
             <Badge variant="outline" className="text-xs text-muted-foreground">
-              All logs loaded
+              Loading more streams...
+            </Badge>
+          )}
+          {!hasMoreStreams && logState.streams.length > 1 && !logState.loading && !isLoadingOlder && (
+            <Badge variant="outline" className="text-xs text-muted-foreground">
+              All streams loaded
             </Badge>
           )}
         </div>
@@ -149,32 +155,16 @@ export default function LogViewer({ appName, appDisplayName, environment }: LogV
             </div>
           ) : (
             <>
-              {/* Loading indicator for older logs */}
-              {loadingOlder && (
-                <div className="flex items-center justify-center py-2 text-muted-foreground">
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Loading older logs...
-                </div>
-              )}
-
               {filteredLogs.map((log, index) => (
                 <div
                   key={`${log.timestamp}-${log.stream}-${index}`}
                   className={cn(
-                    'group rounded border-l-2 border-transparent px-3 py-1 hover:bg-muted/50',
-                    log.message.includes('ERROR') && 'border-l-red-500 bg-red-500/5',
-                    log.message.includes('WARN') && 'border-l-yellow-500 bg-yellow-500/5'
+                    'rounded px-3 py-1 hover:bg-muted/50',
+                    log.message.includes('ERROR') && 'bg-red-500/5',
+                    log.message.includes('WARN') && 'bg-yellow-500/5'
                   )}
                 >
-                  <div className="flex items-start gap-2">
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {formatDate(log.timestamp)}
-                    </span>
-                    <span className="shrink-0 text-xs text-blue-400">
-                      [{log.stream.split('/').pop()}]
-                    </span>
-                    <span className="flex-1 break-words">{log.message}</span>
-                  </div>
+                  <pre className="whitespace-pre-wrap break-words font-mono text-sm">{log.message}</pre>
                 </div>
               ))}
             </>

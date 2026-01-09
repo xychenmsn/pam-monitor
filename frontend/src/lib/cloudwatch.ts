@@ -17,7 +17,7 @@ export class AuthError extends Error {
   }
 }
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:31191';
 
 /**
  * Fetch available apps from backend API
@@ -35,7 +35,23 @@ export async function listApps(env: 'qa' | 'dev' = 'qa'): Promise<App[]> {
 }
 
 /**
- * Fetch latest logs from backend API
+ * Fetch list of log streams sorted by recency (most recent first)
+ */
+export async function getStreamList(env: 'qa' | 'dev', appName: string): Promise<string[]> {
+  const response = await fetch(`${API_BASE}/api/streams?app=${appName}&env=${env}`);
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401 || data.requiresAuth) {
+      throw new AuthError(data.error || 'AWS credentials expired');
+    }
+    throw new Error(data.error || `Failed to fetch streams: ${response.statusText}`);
+  }
+  const data = await response.json();
+  return data.streams;
+}
+
+/**
+ * Fetch latest logs (initial load - 24 hours)
  */
 export async function fetchLatestLogs(
   env: 'qa' | 'dev',
@@ -57,45 +73,48 @@ export async function fetchLatestLogs(
 }
 
 /**
- * Fetch older logs from backend API
+ * Fetch logs from a specific stream
  */
-export async function fetchOlderLogs(
+export async function fetchLogsFromStream(
   env: 'qa' | 'dev',
-  appName: string,
-  olderThanTimestamp: number,
-  limit: number = 500
+  streamName: string,
+  startTime?: number,
+  limit: number = 1000
 ): Promise<LogEvent[]> {
-  const response = await fetch(
-    `${API_BASE}/api/logs/older?app=${appName}&env=${env}&olderThan=${olderThanTimestamp}&limit=${limit}`
-  );
+  const response = await fetch(`${API_BASE}/api/logs/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ streamName, env, startTime, limit }),
+  });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     if (response.status === 401 || data.requiresAuth) {
       throw new AuthError(data.error || 'AWS credentials expired');
     }
-    throw new Error(data.error || `Failed to fetch older logs: ${response.statusText}`);
+    throw new Error(data.error || `Failed to fetch stream logs: ${response.statusText}`);
   }
   const data = await response.json();
   return data.logs;
 }
 
 /**
- * Fetch new logs from backend API (for polling)
+ * Poll specific streams for new logs (efficient)
  */
-export async function fetchNewLogs(
+export async function pollStreams(
   env: 'qa' | 'dev',
-  appName: string,
-  newerThanTimestamp: number
+  streams: { streamName: string; startTime: number }[]
 ): Promise<LogEvent[]> {
-  const response = await fetch(
-    `${API_BASE}/api/logs/newer?app=${appName}&env=${env}&newerThan=${newerThanTimestamp}`
-  );
+  const response = await fetch(`${API_BASE}/api/logs/poll`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ env, streams }),
+  });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     if (response.status === 401 || data.requiresAuth) {
       throw new AuthError(data.error || 'AWS credentials expired');
     }
-    throw new Error(data.error || `Failed to fetch new logs: ${response.statusText}`);
+    throw new Error(data.error || `Failed to poll streams: ${response.statusText}`);
   }
   const data = await response.json();
   return data.logs;

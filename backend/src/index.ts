@@ -3,7 +3,7 @@ import cors from 'cors';
 import * as cloudwatch from './services/cloudwatch.js';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 31191;
 
 // Middleware
 app.use(cors());
@@ -26,13 +26,9 @@ app.get('/api/apps', async (req, res) => {
   } catch (error: any) {
     console.error('Error fetching apps:', error);
     const isAuthError = error.name === 'ExpiredTokenException' ||
-                        error.name === 'UnauthorizedException' ||
-                        error.name === 'InvalidAccessKeyId' ||
-                        error.name === 'SignatureDoesNotMatch' ||
-                        error.code === 'ExpiredToken' ||
-                        error.code === 'Unauthorized' ||
-                        error.message?.includes('security token') ||
-                        error.message?.includes('credentials');
+      error.name === 'UnauthorizedException' ||
+      error.message?.includes('security token') ||
+      error.message?.includes('credentials');
     res.status(isAuthError ? 401 : 500).json({
       error: isAuthError ? 'AWS credentials expired' : 'Failed to fetch apps',
       message: error instanceof Error ? error.message : 'Unknown error',
@@ -42,34 +38,54 @@ app.get('/api/apps', async (req, res) => {
 });
 
 /**
+ * GET /api/streams?app=pamapiqa-worker&env=qa
+ * Get list of log streams sorted by recency (most recent first)
+ */
+app.get('/api/streams', async (req, res) => {
+  try {
+    const { app, env = 'qa' } = req.query;
+    if (!app || typeof app !== 'string') {
+      return res.status(400).json({ error: 'app parameter is required' });
+    }
+    const streams = await cloudwatch.getStreamList(
+      env === 'dev' ? 'dev' : 'qa',
+      app
+    );
+    res.json({ streams });
+  } catch (error: any) {
+    console.error('Error fetching streams:', error);
+    const isAuthError = error.name === 'ExpiredTokenException' ||
+      error.message?.includes('security token') ||
+      error.message?.includes('credentials');
+    res.status(isAuthError ? 401 : 500).json({
+      error: isAuthError ? 'AWS credentials expired' : 'Failed to fetch streams',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      requiresAuth: isAuthError,
+    });
+  }
+});
+
+/**
  * GET /api/logs/latest?app=pamapiqa-worker&env=qa&limit=500
- * Fetch latest logs (most recent first, no time filter)
+ * Initial load: Get logs from last 24 hours
  */
 app.get('/api/logs/latest', async (req, res) => {
   try {
     const { app, env = 'qa', limit = '500' } = req.query;
-
     if (!app || typeof app !== 'string') {
       return res.status(400).json({ error: 'app parameter is required' });
     }
-
     const logs = await cloudwatch.fetchLatestLogs(
       env === 'dev' ? 'dev' : 'qa',
       app,
       Number(limit)
     );
-
     res.json({ logs });
   } catch (error: any) {
     console.error('Error fetching latest logs:', error);
     const isAuthError = error.name === 'ExpiredTokenException' ||
-                        error.name === 'UnauthorizedException' ||
-                        error.name === 'InvalidAccessKeyId' ||
-                        error.name === 'SignatureDoesNotMatch' ||
-                        error.code === 'ExpiredToken' ||
-                        error.code === 'Unauthorized' ||
-                        error.message?.includes('security token') ||
-                        error.message?.includes('credentials');
+      error.message?.includes('security token') ||
+      error.message?.includes('credentials');
     res.status(isAuthError ? 401 : 500).json({
       error: isAuthError ? 'AWS credentials expired' : 'Failed to fetch logs',
       message: error instanceof Error ? error.message : 'Unknown error',
@@ -79,41 +95,30 @@ app.get('/api/logs/latest', async (req, res) => {
 });
 
 /**
- * GET /api/logs/older?app=pamapiqa-worker&env=qa&olderThan=1234567890&limit=500
- * Fetch logs older than a timestamp (for background loading)
+ * POST /api/logs/stream
+ * Get logs from a specific stream
+ * Body: { streamName, env, startTime?, limit? }
  */
-app.get('/api/logs/older', async (req, res) => {
+app.post('/api/logs/stream', async (req, res) => {
   try {
-    const { app, env = 'qa', olderThan, limit = '500' } = req.query;
-
-    if (!app || typeof app !== 'string') {
-      return res.status(400).json({ error: 'app parameter is required' });
+    const { streamName, env = 'qa', startTime, limit = 1000 } = req.body;
+    if (!streamName || typeof streamName !== 'string') {
+      return res.status(400).json({ error: 'streamName parameter is required' });
     }
-
-    if (!olderThan) {
-      return res.status(400).json({ error: 'olderThan parameter is required' });
-    }
-
-    const logs = await cloudwatch.fetchOlderLogs(
+    const logs = await cloudwatch.fetchLogsFromStream(
       env === 'dev' ? 'dev' : 'qa',
-      app,
-      Number(olderThan),
+      streamName,
+      startTime ? Number(startTime) : undefined,
       Number(limit)
     );
-
     res.json({ logs });
   } catch (error: any) {
-    console.error('Error fetching older logs:', error);
+    console.error('Error fetching stream logs:', error);
     const isAuthError = error.name === 'ExpiredTokenException' ||
-                        error.name === 'UnauthorizedException' ||
-                        error.name === 'InvalidAccessKeyId' ||
-                        error.name === 'SignatureDoesNotMatch' ||
-                        error.code === 'ExpiredToken' ||
-                        error.code === 'Unauthorized' ||
-                        error.message?.includes('security token') ||
-                        error.message?.includes('credentials');
+      error.message?.includes('security token') ||
+      error.message?.includes('credentials');
     res.status(isAuthError ? 401 : 500).json({
-      error: isAuthError ? 'AWS credentials expired' : 'Failed to fetch older logs',
+      error: isAuthError ? 'AWS credentials expired' : 'Failed to fetch stream logs',
       message: error instanceof Error ? error.message : 'Unknown error',
       requiresAuth: isAuthError,
     });
@@ -121,40 +126,28 @@ app.get('/api/logs/older', async (req, res) => {
 });
 
 /**
- * GET /api/logs/newer?app=pamapiqa-worker&env=qa&newerThan=1234567890
- * Fetch logs newer than a timestamp (for polling)
+ * POST /api/logs/poll
+ * Poll specific streams for new logs (efficient)
+ * Body: { env, streams: [{ streamName, startTime }] }
  */
-app.get('/api/logs/newer', async (req, res) => {
+app.post('/api/logs/poll', async (req, res) => {
   try {
-    const { app, env = 'qa', newerThan } = req.query;
-
-    if (!app || typeof app !== 'string') {
-      return res.status(400).json({ error: 'app parameter is required' });
+    const { env = 'qa', streams } = req.body;
+    if (!Array.isArray(streams)) {
+      return res.status(400).json({ error: 'streams must be an array' });
     }
-
-    if (!newerThan) {
-      return res.status(400).json({ error: 'newerThan parameter is required' });
-    }
-
-    const logs = await cloudwatch.fetchNewLogs(
+    const logs = await cloudwatch.fetchNewLogsFromStreams(
       env === 'dev' ? 'dev' : 'qa',
-      app,
-      Number(newerThan)
+      streams
     );
-
     res.json({ logs });
   } catch (error: any) {
-    console.error('Error fetching newer logs:', error);
+    console.error('Error polling logs:', error);
     const isAuthError = error.name === 'ExpiredTokenException' ||
-                        error.name === 'UnauthorizedException' ||
-                        error.name === 'InvalidAccessKeyId' ||
-                        error.name === 'SignatureDoesNotMatch' ||
-                        error.code === 'ExpiredToken' ||
-                        error.code === 'Unauthorized' ||
-                        error.message?.includes('security token') ||
-                        error.message?.includes('credentials');
+      error.message?.includes('security token') ||
+      error.message?.includes('credentials');
     res.status(isAuthError ? 401 : 500).json({
-      error: isAuthError ? 'AWS credentials expired' : 'Failed to fetch newer logs',
+      error: isAuthError ? 'AWS credentials expired' : 'Failed to poll logs',
       message: error instanceof Error ? error.message : 'Unknown error',
       requiresAuth: isAuthError,
     });
@@ -167,9 +160,10 @@ app.listen(PORT, () => {
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`📝 Stateless API endpoints:`);
   console.log(`   GET  /api/apps?env=qa|dev`);
+  console.log(`   GET  /api/streams?app=xxx&env=qa`);
   console.log(`   GET  /api/logs/latest?app=xxx&env=qa&limit=500`);
-  console.log(`   GET  /api/logs/older?app=xxx&env=qa&olderThan=timestamp&limit=500`);
-  console.log(`   GET  /api/logs/newer?app=xxx&env=qa&newerThan=timestamp`);
+  console.log(`   POST /api/logs/stream`);
+  console.log(`   POST /api/logs/poll`);
 });
 
 // Graceful shutdown
