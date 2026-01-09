@@ -1,4 +1,4 @@
-import { AlertCircle, Terminal } from 'lucide-react'
+import { AlertCircle, Terminal, RotateCcw } from 'lucide-react'
 import { Button } from './ui/button'
 
 interface AuthDialogProps {
@@ -11,7 +11,7 @@ export default function AuthDialog({ isOpen, onRetry }: AuthDialogProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
-      <div className="mx-4 max-w-md rounded-lg border bg-background p-6 shadow-lg">
+      <div className="mx-4 max-w-lg rounded-lg border bg-background p-6 shadow-lg">
         <div className="flex items-start gap-4">
           <div className="rounded-full bg-destructive/10 p-2">
             <AlertCircle className="h-6 w-6 text-destructive" />
@@ -19,7 +19,7 @@ export default function AuthDialog({ isOpen, onRetry }: AuthDialogProps) {
           <div className="flex-1">
             <h2 className="text-lg font-semibold">AWS Credentials Expired</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Your AWS credentials have expired. Please refresh them by running:
+              Your AWS credentials have expired. Please refresh them:
             </p>
             <div className="mt-3 rounded-md bg-muted p-3 font-mono text-sm">
               <div className="flex items-center gap-2">
@@ -30,10 +30,14 @@ export default function AuthDialog({ isOpen, onRetry }: AuthDialogProps) {
             <p className="mt-3 text-sm text-muted-foreground">
               After running the command, click the button below to retry.
             </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              💡 The app will automatically pick up the new credentials - no restart needed!
+            </p>
           </div>
         </div>
         <div className="mt-6 flex justify-end">
           <Button onClick={onRetry}>
+            <RotateCcw className="mr-2 h-4 w-4" />
             I've Run peacock security - Retry
           </Button>
         </div>
