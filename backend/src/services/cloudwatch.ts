@@ -81,18 +81,26 @@ export async function getECSClient(): Promise<ECSClient> {
  */
 function isAuthError(error: any): boolean {
   if (!error) return false;
-  const errorCode = error.name || error.Code || error.errorCode;
+  const errorCode = error.name || error.Code || error.errorCode || error.__type || '';
   const errorMessage = error.message || error.Message || error.errorMessage || '';
-  return (
+
+  const isAuth = (
     errorCode === 'ExpiredTokenException' ||
     errorCode === 'UnauthorizedException' ||
     errorCode === 'InvalidClientTokenId' ||
     errorCode === 'SignatureDoesNotMatch' ||
+    errorCode.includes('ExpiredToken') ||
     errorMessage.includes('security token') ||
     errorMessage.includes('credentials') ||
     errorMessage.includes('unauthorized') ||
     errorMessage.includes('expired')
   );
+
+  if (isAuth) {
+    console.log(`[AUTH] Detected authentication error: code="${errorCode}", message="${errorMessage.substring(0, 100)}..."`);
+  }
+
+  return isAuth;
 }
 
 /**
@@ -106,25 +114,44 @@ export async function withAutoRetry<T>(
     return await fn(client);
   } catch (error: any) {
     if (isAuthError(error)) {
-      console.log('⚠️  AWS credentials expired. Invalidating client cache...');
+      console.log('⚠️  AWS credentials expired. Starting auto-recovery...');
+
+      // Diagnostic: Check credentials file status
+      try {
+        const stats = fs.statSync(path.join(process.env.HOME || '', '.aws/credentials'));
+        console.log(`[AUTH] ~/.aws/credentials last modified: ${stats.mtime.toISOString()}`);
+      } catch (e) {
+        console.warn('[AUTH] Could not stat ~/.aws/credentials');
+      }
 
       // Invalidate both clients to force fresh creation on next attempt
+      console.log('[AUTH] Invalidating client cache...');
       cwClient = null;
       ecsClient = null;
 
       // Check for stale environment variables which might block reading from updated ~/.aws/credentials
-      if (process.env.AWS_ACCESS_KEY_ID) {
-        console.log('🔄 Detected AWS Environment Variables. Clearing them to force fallback to shared credentials file...');
+      if (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_PROFILE) {
+        console.log(`[AUTH] Current Environment: AWS_PROFILE=${process.env.AWS_PROFILE}, HAS_KEY=${!!process.env.AWS_ACCESS_KEY_ID}`);
+        console.log('[AUTH] Clearing AWS environment variables to force fallback to shared credentials file...');
         delete process.env.AWS_ACCESS_KEY_ID;
         delete process.env.AWS_SECRET_ACCESS_KEY;
         delete process.env.AWS_SESSION_TOKEN;
         delete process.env.AWS_SECURITY_TOKEN;
+        // Do NOT delete AWS_PROFILE if it's explicitly set to 'saml', as it might be needed
+        // but we want to make sure the PROVIDER chain re-evaluates.
       }
 
-      console.log('Retrying with fresh client...');
+      console.log('[AUTH] Retrying with fresh client creation...');
       // Create a fresh client that will read new credentials from file/provider
       client = await getClient();
-      return await fn(client);
+      try {
+        const result = await fn(client);
+        console.log('[AUTH] ✅ Retry successful!');
+        return result;
+      } catch (retryError: any) {
+        console.error('[AUTH] ❌ Retry failed even after clearing cache:', retryError.name || retryError.__type || retryError.message);
+        throw retryError;
+      }
     }
     throw error;
   }

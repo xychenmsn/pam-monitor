@@ -81,15 +81,18 @@ export async function getDashboardStatus(env: 'qa' | 'dev' = 'qa'): Promise<AppD
 
         try {
             await withAutoRetry(async (cw) => {
+                // Strategy: Similar to getStreamList, fetch recent streams globally and filter by prefix manually
+                // This avoids the forbidden combination of orderBy='LastEventTime' and logStreamNamePrefix
                 const command = new DescribeLogStreamsCommand({
                     logGroupName: app.logGroup,
-                    logStreamNamePrefix: app.logStreamPrefix,
                     orderBy: 'LastEventTime',
                     descending: true,
-                    limit: 5
+                    limit: 30 // Check top 30 active streams in the group
                 });
                 const response = await cw.send(command);
-                streams = response.logStreams || [];
+                const allStreams = response.logStreams || [];
+                // Filter manually by prefix
+                streams = allStreams.filter(s => s.logStreamName && s.logStreamName.startsWith(app.logStreamPrefix)).slice(0, 5);
             });
         } catch (err) {
             console.warn(`Failed to fetch logs for ${app.name}:`, err);

@@ -6,10 +6,24 @@ import { getAppDetails, restartService } from './services/details.js';
 
 const app = express();
 const port = process.env.PORT || 31191;
+const SESSION_ID = Math.random().toString(36).substring(7);
+console.log(`[INIT] Server Session ID: ${SESSION_ID}`);
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Request logger
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    if (req.path !== '/health') {
+      console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} ${res.statusCode} ${duration}ms`);
+    }
+  });
+  next();
+});
 
 // Routes
 app.get('/health', (req, res) => {
@@ -21,14 +35,19 @@ app.get('/health', (req, res) => {
  * Check if AWS credentials are valid
  */
 app.get('/api/auth/aws/status', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   const isValid = await cloudwatch.checkAuth();
   if (isValid) {
-    res.json({ authenticated: true });
+    res.json({ authenticated: true, sessionId: SESSION_ID });
   } else {
     res.status(401).json({
       authenticated: false,
       error: 'AWS credentials expired',
-      requiresAuth: true
+      requiresAuth: true,
+      sessionId: SESSION_ID
     });
   }
 });
