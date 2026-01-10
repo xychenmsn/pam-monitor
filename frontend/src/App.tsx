@@ -5,11 +5,14 @@ import { listApps, type App, AuthError } from './lib/cloudwatch'
 import Navbar from './components/navbar'
 import Sidebar from './components/sidebar'
 import LogViewer from './components/log-viewer'
+import Dashboard from './components/dashboard'
+import AppDetailView from './components/app-detail-view'
 import RobustAuthDialog from './components/robust-auth-dialog'
 
 function AppComponent() {
   const [apps, setApps] = useState<App[]>([])
   const [selectedApp, setSelectedApp] = useState<string>('')
+  const [initialStream, setInitialStream] = useState<string | undefined>(undefined)
   const [environment, setEnvironment] = useState<'qa' | 'dev'>('qa')
   const [loading, setLoading] = useState(true)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -22,9 +25,7 @@ function AppComponent() {
       const data = await listApps(environment)
       setApps(data)
       setAuthError(false)
-      if (data.length > 0 && !selectedApp) {
-        setSelectedApp(data[0].name)
-      }
+
       return true // Success
     } catch (error) {
       console.error('Error fetching apps:', error)
@@ -43,8 +44,9 @@ function AppComponent() {
 
   // Update selected app if current selection is no longer available
   useEffect(() => {
-    if (apps.length > 0 && !apps.find(a => a.name === selectedApp)) {
-      setSelectedApp(apps[0].name)
+    if (apps.length > 0 && selectedApp && !apps.find(a => a.name === selectedApp)) {
+      setSelectedApp('')
+      setInitialStream(undefined)
     }
   }, [apps, selectedApp])
 
@@ -52,6 +54,11 @@ function AppComponent() {
   const handleRetryAuth = useCallback(async (): Promise<boolean> => {
     return await fetchApps()
   }, [fetchApps])
+
+  const handleAppSelect = (appName: string, stream?: string) => {
+    setSelectedApp(appName)
+    setInitialStream(stream)
+  }
 
   return (
     <>
@@ -70,7 +77,7 @@ function AppComponent() {
           <Sidebar
             apps={apps}
             selectedApp={selectedApp}
-            onAppSelect={setSelectedApp}
+            onAppSelect={(name) => handleAppSelect(name, undefined)}
             collapsed={sidebarCollapsed}
             loading={loading}
           />
@@ -83,19 +90,20 @@ function AppComponent() {
             )}
           >
             {selectedApp ? (
-              <LogViewer
+              <AppDetailView
                 appName={selectedApp}
-                appDisplayName={apps.find(a => a.name === selectedApp)?.displayName || selectedApp}
+                initialStream={initialStream || undefined}
                 environment={environment}
+                onBack={() => {
+                  setSelectedApp('')
+                  setInitialStream(undefined)
+                }}
               />
             ) : (
-              <div className="flex h-full items-center justify-center text-muted-foreground">
-                <div className="text-center">
-                  <Database className="mx-auto mb-4 h-16 w-16 opacity-50" />
-                  <p className="text-lg">No apps available</p>
-                  <p className="text-sm">Make sure you've run `peacock security` to authenticate with AWS</p>
-                </div>
-              </div>
+              <Dashboard
+                environment={environment}
+                onAppSelect={handleAppSelect}
+              />
             )}
           </main>
         </div>

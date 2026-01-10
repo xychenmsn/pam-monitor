@@ -1,0 +1,86 @@
+{
+    "qa": [
+        {
+            "id": "pam-sms",
+            "name": "PAM (SMS)",
+            "logGroup": "custom-apps-pam-cloudwatch-qa",
+            "logStreamPrefix": "ecs/pamqa",
+            "cluster": "ecs-custom-apps-pam-qa",
+            "service": "pamqa-service"
+        },
+        {
+            "id": "rmx",
+            "name": "RMX (Resquared)",
+            "logGroup": "custom-apps-pam-cloudwatch-qa",
+            "logStreamPrefix": "ecs/rmxqa",
+            "cluster": "ecs-custom-apps-pam-qa",
+            "service": "rmxqa-service"
+        },
+        {
+            "id": "pam-api",
+            "name": "PAM API",
+            "logGroup": "custom-apps-pam-cloudwatch-qa",
+            "logStreamPrefix": "ecs/pamapiqa",
+            "cluster": "ecs-custom-apps-pam-qa",
+            "service": "pamapiqa-service"
+        },
+        {
+            "id": "tad",
+            "name": "TAD",
+            "logGroup": "custom-apps-pam-cloudwatch-qa",
+            "logStreamPrefix": "ecs/tadqa",
+            "cluster": "ecs-custom-apps-pam-qa",
+            "service": "tadqa-service"
+        },
+        {
+            "id": "remora",
+            "name": "PAM Admin (Remora)",
+            "logGroup": "custom-apps-pam-cloudwatch-qa",
+            "logStreamPrefix": "ecs/pamadminqa",
+            "cluster": "ecs-custom-apps-pam-qa",
+            "service": "pamadminqa-service"
+        }
+    ],
+    "dev": [
+        {
+            "id": "pam-sms",
+            "name": "PAM (SMS)",
+            "logGroup": "custom-apps-pam-cloudwatch-dev",
+            "logStreamPrefix": "ecs/pamdev",
+            "cluster": "ecs-custom-apps-pam-dev",
+            "service": "pamdev-service"
+        },
+        {
+            "id": "rmx",
+            "name": "RMX (Resquared)",
+            "logGroup": "custom-apps-pam-cloudwatch-dev",
+            "logStreamPrefix": "ecs/rmxdev",
+            "cluster": "ecs-custom-apps-pam-dev",
+            "service": "rmxdev-service"
+        },
+        {
+            "id": "pam-api",
+            "name": "PAM API",
+            "logGroup": "custom-apps-pam-cloudwatch-dev",
+            "logStreamPrefix": "ecs/pamapidev",
+            "cluster": "ecs-custom-apps-pam-dev",
+            "service": "pamapidev-service"
+        },
+        {
+            "id": "tad",
+            "name": "TAD",
+            "logGroup": "custom-apps-pam-cloudwatch-dev",
+            "logStreamPrefix": "ecs/taddev",
+            "cluster": "ecs-custom-apps-pam-dev",
+            "service": "taddev-service"
+        },
+        {
+            "id": "remora",
+            "name": "PAM Admin (Remora)",
+            "logGroup": "custom-apps-pam-cloudwatch-dev",
+            "logStreamPrefix": "ecs/pamadmindev",
+            "cluster": "ecs-custom-apps-pam-dev",
+            "service": "pamadmindev-service"
+        }
+    ]
+}

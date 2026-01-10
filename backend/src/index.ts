@@ -1,9 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import * as cloudwatch from './services/cloudwatch.js';
+import { getDashboardStatus } from './services/dashboard.js';
+import { getAppDetails } from './services/details.js';
 
 const app = express();
-const PORT = process.env.PORT || 31191;
+const port = process.env.PORT || 31191;
 
 // Middleware
 app.use(cors());
@@ -37,6 +39,44 @@ app.get('/api/apps', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/dashboard/status?env=qa
+ * Get dashboard status for all apps (optimized global scan)
+ */
+app.get('/api/dashboard/status', async (req, res) => {
+  try {
+    const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+    const status = await getDashboardStatus(env);
+    res.json(status);
+  } catch (error: any) {
+    console.error('Error fetching dashboard status:', error);
+    const isAuthError = error.name === 'ExpiredTokenException' ||
+      error.name === 'UnauthorizedException' ||
+      error.message?.includes('security token') ||
+      error.message?.includes('credentials');
+    res.status(isAuthError ? 401 : 500).json({
+      error: isAuthError ? 'AWS credentials expired' : 'Failed to fetch status',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      requiresAuth: isAuthError,
+    });
+  }
+});
+
+app.get('/api/apps/:appName/details', async (req, res) => {
+  const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+  const appName = req.params.appName;
+  try {
+    const result = await getAppDetails(appName, env);
+    if (!result) {
+      res.status(404).json({ error: 'App not found details' });
+      return;
+    }
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch details' });
+  }
+});
 /**
  * GET /api/streams?app=pamapiqa-worker&env=qa
  * Get list of log streams sorted by recency (most recent first)
@@ -285,9 +325,9 @@ app.get('/api/logs/live', async (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`🚀 PAM Monitor API server running on http://localhost:${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
+app.listen(port, () => {
+  console.log(`🚀 PAM Monitor API server running on http://localhost:${port}`);
+  console.log(`📊 Health check: http://localhost:${port}/health`);
   console.log(`📝 Stateless API endpoints:`);
   console.log(`   GET  /api/apps?env=qa|dev`);
   console.log(`   GET  /api/streams?app=xxx&env=qa`);

@@ -6,14 +6,15 @@ import {
   GetLogEventsCommand,
   StartLiveTailCommand,
 } from '@aws-sdk/client-cloudwatch-logs';
+import { ECSClient } from '@aws-sdk/client-ecs';
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 
-const LOG_GROUPS = {
+export const LOG_GROUPS = {
   qa: 'custom-apps-pam-cloudwatch-qa',
   dev: 'custom-apps-pam-cloudwatch-nonprod',
 };
 
-const APP_DISPLAY_NAMES: Record<string, string> = {
+export const APP_DISPLAY_NAMES: Record<string, string> = {
   pamadminqa: 'PAM Admin',
   pamapiqa: 'PAM API',
   'pamapiqa-worker': 'PAM API Worker',
@@ -24,7 +25,7 @@ const APP_DISPLAY_NAMES: Record<string, string> = {
   psiqa: 'PSI',
 };
 
-const APP_PREFIXES = [
+export const APP_PREFIXES = [
   'pamadminqa',
   'pamapiqa',
   'pamapiqa-worker',
@@ -38,19 +39,41 @@ const APP_PREFIXES = [
   'pammanagementqa',
 ];
 
-/**
- * Get a fresh CloudWatch client - ALWAYS reads fresh credentials
- * Uses fromNodeProviderChain() which reads from:
- * 1. Environment variables (AWS_ACCESS_KEY_ID, etc.)
- * 2. Shared credentials file (~/.aws/credentials) with AWS_PROFILE
- * 3. Other providers in the default chain
- * This is completely stateless - creates fresh credentials on each call
- */
-function getClient(): CloudWatchLogsClient {
-  return new CloudWatchLogsClient({
-    region: 'us-east-1',
-    credentials: fromNodeProviderChain(), // Uses full default credential chain
-  });
+const REGION = 'us-east-1';
+
+let cwClient: CloudWatchLogsClient | null = null;
+let ecsClient: ECSClient | null = null;
+
+export async function getClient(): Promise<CloudWatchLogsClient> {
+  if (cwClient) return cwClient;
+
+  try {
+    cwClient = new CloudWatchLogsClient({
+      region: REGION,
+      credentials: fromNodeProviderChain(),
+    });
+    return cwClient;
+  } catch (error) {
+    console.warn('Failed to load credentials from chain');
+    cwClient = new CloudWatchLogsClient({ region: REGION });
+    return cwClient;
+  }
+}
+
+export async function getECSClient(): Promise<ECSClient> {
+  if (ecsClient) return ecsClient;
+
+  try {
+    ecsClient = new ECSClient({
+      region: REGION,
+      credentials: fromNodeProviderChain(),
+    });
+    return ecsClient;
+  } catch (error) {
+    console.warn('Failed to load ECS credentials from chain');
+    ecsClient = new ECSClient({ region: REGION });
+    return ecsClient;
+  }
 }
 
 /**
@@ -75,10 +98,10 @@ function isAuthError(error: any): boolean {
 /**
  * Wrapper that automatically retries with fresh credentials on auth errors
  */
-async function withAutoRetry<T>(
+export async function withAutoRetry<T>(
   fn: (client: CloudWatchLogsClient) => Promise<T>
 ): Promise<T> {
-  let client = getClient();
+  let client = await getClient();
   try {
     return await fn(client);
   } catch (error: any) {
@@ -96,7 +119,7 @@ async function withAutoRetry<T>(
 
       console.log('Retrying with fresh client...');
       // Create a fresh client that will read new credentials from file/provider
-      client = getClient();
+      client = await getClient();
       return await fn(client);
     }
     throw error;
@@ -106,43 +129,28 @@ async function withAutoRetry<T>(
 /**
  * List all available apps for an environment
  */
+
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const configPath = path.join(__dirname, '../config/applications.json');
+const allApps = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+
+/**
+ * List all available apps for an environment
+ */
 export async function listApps(env: 'qa' | 'dev' = 'qa') {
-  const logGroupName = LOG_GROUPS[env];
-  const apps = [];
+  const appsConfig = allApps[env] || [];
 
-  const results = await Promise.allSettled(
-    APP_PREFIXES.map(async (prefix) => {
-      try {
-        return await withAutoRetry(async (client) => {
-          const command = new DescribeLogStreamsCommand({
-            logGroupName,
-            logStreamNamePrefix: `ecs/${prefix}`,
-            limit: 1,
-          });
-          const response = await client.send(command);
-
-          if (response.logStreams && response.logStreams.length > 0) {
-            return {
-              name: prefix,
-              displayName: APP_DISPLAY_NAMES[prefix] || prefix,
-              logStreamPrefix: `ecs/${prefix}`,
-            };
-          }
-          return null;
-        });
-      } catch {
-        return null;
-      }
-    })
-  );
-
-  for (const result of results) {
-    if (result.status === 'fulfilled' && result.value) {
-      apps.push(result.value);
-    }
-  }
-
-  return apps.sort((a, b) => a.displayName.localeCompare(b.displayName));
+  return appsConfig.map((app: any) => ({
+    name: app.name, // Use the display name as the key ID to match Dashboard
+    displayName: app.name,
+    logStreamPrefix: app.logStreamPrefix,
+    // We can also return other props if needed, but this satisfies the App interface
+  }));
 }
 
 /**
@@ -402,7 +410,7 @@ export async function startLiveTail(
     }
 
     // 2. Create client AFTER ARN check (so it picks up any env changes from withAutoRetry)
-    const client = getClient();
+    const client = await getClient();
 
     // Remove :* suffix if present (sometimes ARN has it)
     const cleanArn = logGroupArn.endsWith(':*') ? logGroupArn.slice(0, -2) : logGroupArn;

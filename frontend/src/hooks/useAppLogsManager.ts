@@ -39,7 +39,7 @@ export function useAppLogsManager() {
   /**
    * Start Polling for an app
    */
-  const initializeApp = useCallback(async (appName: string, env: 'qa' | 'dev'): Promise<void> => {
+  const initializeApp = useCallback(async (appName: string, env: 'qa' | 'dev', initialStream?: string): Promise<void> => {
     const key = getAppKey(appName, env)
 
     // Skip if already polling
@@ -50,20 +50,24 @@ export function useAppLogsManager() {
     updateAppState(key, { loading: true, error: null, logs: [] })
 
     try {
-      // 1. Find the active stream
-      const strings = await getStreamList(env, appName);
-      // Ensure we treat the response correctly (it's string[])
-      const streams: string[] = Array.isArray(strings) ? strings : (strings as any).streams || [];
+      let streamName = initialStream
 
-      if (!streams || streams.length === 0) {
-        updateAppState(key, {
-          loading: false,
-          error: 'No active log streams found for this app. Trigger some activity and try again.'
-        })
-        return;
+      if (!streamName) {
+        // 1. Find the active stream (only if not provided)
+        const strings = await getStreamList(env, appName);
+        // Ensure we treat the response correctly (it's string[])
+        const streams: string[] = Array.isArray(strings) ? strings : (strings as any).streams || [];
+
+        if (!streams || streams.length === 0) {
+          updateAppState(key, {
+            loading: false,
+            error: 'No active log streams found for this app. Trigger some activity and try again.'
+          })
+          return;
+        }
+        streamName = streams[0] // Latest stream
       }
 
-      const streamName = streams[0]; // Latest stream
       console.log(`[${key}] Found active stream: ${streamName}`);
 
       // 2. Initial Fetch

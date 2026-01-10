@@ -77,3 +77,33 @@ export async function getLogEvents(
   return response.json();
 }
 
+export interface AppDashboardStatus {
+  name: string;
+  displayName: string;
+  activeStreamCount: number;
+  lastActivityTime: number | null;
+  lastStreamName: string | null;
+  streams: string[];
+  status: 'active' | 'inactive';
+  ecsStatus: {
+    status: string;
+    runningCount: number;
+    desiredCount: number;
+    events: string[];
+  } | null;
+}
+
+/**
+ * Fetch dashboard status (global scan)
+ */
+export async function getDashboardStatus(env: 'qa' | 'dev'): Promise<AppDashboardStatus[]> {
+  const response = await fetch(`${API_BASE}/api/dashboard/status?env=${env}`);
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401 || data.requiresAuth) {
+      throw new AuthError(data.error || 'AWS credentials expired');
+    }
+    throw new Error(data.error || `Failed to fetch dashboard status: ${response.statusText}`);
+  }
+  return response.json();
+}

@@ -6,9 +6,11 @@ interface LogViewerProps {
   appName: string
   appDisplayName: string
   environment: 'qa' | 'dev'
+  initialStream?: string
+  minimal?: boolean
 }
 
-export default function LogViewer({ appName, appDisplayName, environment }: LogViewerProps) {
+export default function LogViewer({ appName, appDisplayName, environment, initialStream, minimal }: LogViewerProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [autoScroll, setAutoScroll] = useState(true)
   const [initialLoadDone, setInitialLoadDone] = useState(false)
@@ -38,9 +40,9 @@ export default function LogViewer({ appName, appDisplayName, environment }: LogV
 
   // Initialize app when component mounts or app changes
   useEffect(() => {
-    initializeApp(appName, environment)
+    initializeApp(appName, environment, initialStream)
     setInitialLoadDone(false)
-  }, [appName, environment, initializeApp])
+  }, [appName, environment, initializeApp, initialStream])
 
   // Get current log state
   const logState: AppLogsState = getAppLogs(appName, environment)
@@ -75,57 +77,89 @@ export default function LogViewer({ appName, appDisplayName, environment }: LogV
   )
 
   return (
-    <div className="flex flex-col h-full bg-[#1e1e1e] text-gray-300 font-mono text-sm">
+    <div className="flex flex-col h-full bg-[#1e1e1e] text-gray-300 font-sans">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-[#2d2d2d] border-b border-[#404040]">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-white">{appDisplayName}</span>
-            <span className="text-xs px-2 py-0.5 rounded bg-[#404040] text-gray-400">
-              {environment.toUpperCase()}
-            </span>
-          </div>
-          {/* Connection Status */}
-          <div className="flex items-center gap-2 text-xs">
-            {logState.connected ? (
-              <span className="flex items-center gap-1 text-green-400">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                POLLING ACTIVE (v2)
+      {!minimal && (
+        <div className="flex items-center justify-between px-4 py-2 bg-[#2d2d2d] border-b border-[#404040]">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-white">{appDisplayName}</span>
+              <span className="text-xs px-2 py-0.5 rounded bg-[#404040] text-gray-400">
+                {environment.toUpperCase()}
               </span>
-            ) : logState.loading ? (
-              <span className="text-yellow-400">Connecting...</span>
-            ) : logState.error ? (
-              <span className="text-red-400">Disconnected</span>
-            ) : (
-              <span className="text-gray-500">Offline</span>
-            )}
-            <span className="text-gray-500 ml-2">
-              {filteredLogs.length} events
-            </span>
+            </div>
+            {/* Connection Status */}
+            <div className="flex items-center gap-2 text-xs">
+              {logState.connected ? (
+                <span className="flex items-center gap-1 text-green-400">
+                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                  POLLING ACTIVE (v2)
+                </span>
+              ) : logState.loading ? (
+                <span className="text-yellow-400">Connecting...</span>
+              ) : logState.error ? (
+                <span className="text-red-400">Disconnected</span>
+              ) : (
+                <span className="text-gray-500">Offline</span>
+              )}
+              <span className="text-gray-500 ml-2">
+                {filteredLogs.length} events
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+              <input
+                type="text"
+                placeholder="Filter logs..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-64 bg-[#1e1e1e] border border-[#404040] rounded pl-8 pr-3 py-1 text-xs focus:outline-none focus:border-blue-500 transition-colors"
+              />
+            </div>
+
+            <button
+              onClick={() => clearAppLogs(appName, environment)}
+              className="p-1.5 hover:bg-[#404040] rounded transition-colors text-gray-400 hover:text-white"
+              title="Clear Logs"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
           </div>
         </div>
+      )}
 
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+      {minimal && (
+        <div className="flex items-center justify-between p-2 border-b border-[#333] bg-[#252525] text-xs">
+          <div className="flex items-center gap-3">
+            {logState.connected ? (
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            ) : (
+              <span className="w-2 h-2 rounded-full bg-gray-600" />
+            )}
+            <span className="text-gray-500">{logState.connected ? "LIVE" : "PAUSED"}</span>
+            {initialStream && <span className="font-mono opacity-50 truncate max-w-[200px]">Stream: {initialStream.split('/').pop()}</span>}
+          </div>
+          <div className="flex items-center gap-2">
             <input
               type="text"
-              placeholder="Filter logs..."
+              placeholder="Filter..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-64 bg-[#1e1e1e] border border-[#404040] rounded pl-8 pr-3 py-1 text-xs focus:outline-none focus:border-blue-500 transition-colors"
+              className="bg-[#1a1a1a] border border-[#333] rounded px-2 py-1 focus:outline-none focus:border-blue-500 w-48"
             />
+            <button
+              onClick={() => clearAppLogs(appName, environment)}
+              className="hover:text-red-400 p-1"
+              title="Clear Logs"
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
           </div>
-
-          <button
-            onClick={() => clearAppLogs(appName, environment)}
-            className="p-1.5 hover:bg-[#404040] rounded transition-colors text-gray-400 hover:text-white"
-            title="Clear Logs"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
         </div>
-      </div>
+      )}
 
       {/* Log Content */}
       <div
