@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ArrowLeft, Activity, Box, Settings, FileText, CheckCircle, Clock, RotateCcw, Shield, Layers, AlertCircle } from 'lucide-react';
 import LogViewer from './log-viewer';
+import ConfirmationModal from './confirmation-modal';
 import { cn } from '@/lib/utils';
 
 interface AppDetailViewProps {
@@ -60,6 +61,7 @@ export default function AppDetailView({ appName, initialStream, environment, onB
     const [loading, setLoading] = useState(false);
     const [restarting, setRestarting] = useState(false);
     const [restartSuccess, setRestartSuccess] = useState(false);
+    const [showRestartConfirm, setShowRestartConfirm] = useState(false);
 
     useEffect(() => {
         if (isAuthError) return;
@@ -85,11 +87,8 @@ export default function AppDetailView({ appName, initialStream, environment, onB
     };
 
     const handleRestart = async () => {
-        if (!confirm(`Are you sure you want to restart ${appName} in ${environment.toUpperCase()}? This will trigger a rolling update.`)) {
-            return;
-        }
-
         setRestarting(true);
+        setShowRestartConfirm(false);
         try {
             const res = await fetch(`http://localhost:31191/api/apps/${appName}/restart?env=${environment}`, {
                 method: 'POST'
@@ -149,7 +148,7 @@ export default function AppDetailView({ appName, initialStream, environment, onB
                                     <Activity className="w-4 h-4" /> Service Status
                                 </h3>
                                 <button
-                                    onClick={handleRestart}
+                                    onClick={() => setShowRestartConfirm(true)}
                                     disabled={restarting || restartSuccess}
                                     className={cn(
                                         "flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-all",
@@ -453,6 +452,16 @@ export default function AppDetailView({ appName, initialStream, environment, onB
                     </div>
                 )}
             </div>
+
+            <ConfirmationModal
+                isOpen={showRestartConfirm}
+                onClose={() => setShowRestartConfirm(false)}
+                onConfirm={handleRestart}
+                title="Confirm Restart"
+                message={`Are you sure you want to restart ${details?.overview.displayName || appName} in ${environment.toUpperCase()}?`}
+                confirmText="Restart Service"
+                isLoading={restarting}
+            />
         </div>
     );
 }
