@@ -13,6 +13,7 @@ const allApps = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 export interface AppDetail {
     overview: {
         status: string;
+        displayName?: string;
         runningCount: number;
         desiredCount: number;
         createdAt: Date;
@@ -110,6 +111,7 @@ export async function getAppDetails(appName: string, env: 'qa' | 'dev'): Promise
         return {
             overview: {
                 status: service.status || 'UNKNOWN',
+                displayName: appConfig.name,
                 runningCount: service.runningCount || 0,
                 desiredCount: service.desiredCount || 0,
                 createdAt: service.createdAt || new Date(),

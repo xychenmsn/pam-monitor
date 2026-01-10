@@ -176,7 +176,7 @@ export async function listApps(env: 'qa' | 'dev' = 'qa') {
   const appsConfig = allApps[env] || [];
 
   return appsConfig.map((app: any) => ({
-    name: app.name, // Use the display name as the key ID to match Dashboard
+    name: app.id, // Use ID as the primary key ID to match Dashboard
     displayName: app.name,
     logStreamPrefix: app.logStreamPrefix,
     // We can also return other props if needed, but this satisfies the App interface

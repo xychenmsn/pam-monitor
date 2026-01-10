@@ -14,6 +14,7 @@ interface AppDetailViewProps {
 interface AppDetails {
     overview: {
         status: string;
+        displayName?: string;
         runningCount: number;
         desiredCount: number;
         createdAt: string;
@@ -117,7 +118,9 @@ export default function AppDetailView({ appName, initialStream, environment, onB
                     <ArrowLeft className="w-5 h-5 text-gray-400" />
                 </button>
                 <div>
-                    <h1 className="text-xl font-bold text-white">{appName}</h1>
+                    <h1 className="text-xl font-bold text-white">
+                        {details?.overview.displayName || appName}
+                    </h1>
                     <span className="text-xs text-blue-400 font-mono">{environment.toUpperCase()}</span>
                 </div>
             </div>
