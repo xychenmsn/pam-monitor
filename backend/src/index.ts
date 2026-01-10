@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import * as cloudwatch from './services/cloudwatch.js';
 import { getDashboardStatus } from './services/dashboard.js';
-import { getAppDetails } from './services/details.js';
+import { getAppDetails, restartService } from './services/details.js';
 
 const app = express();
 const port = process.env.PORT || 31191;
@@ -75,6 +75,22 @@ app.get('/api/apps/:appName/details', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch details' });
+  }
+});
+
+app.post('/api/apps/:appName/restart', async (req, res) => {
+  const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+  const appName = req.params.appName;
+  try {
+    const success = await restartService(appName, env);
+    if (success) {
+      res.json({ message: `Successfully triggered restart for ${appName}` });
+    } else {
+      res.status(500).json({ error: `Failed to trigger restart for ${appName}` });
+    }
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to restart' });
   }
 });
 /**

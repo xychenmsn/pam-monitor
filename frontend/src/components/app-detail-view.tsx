@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Activity, Box, Settings, FileText, AlertCircle, CheckCircle, Clock } from 'lucide-react';
+import { ArrowLeft, Activity, Box, Settings, FileText, AlertCircle, CheckCircle, Clock, RotateCcw } from 'lucide-react';
 import LogViewer from './log-viewer';
 import { cn } from '@/lib/utils';
 
@@ -43,6 +43,8 @@ export default function AppDetailView({ appName, initialStream, environment, onB
     const [activeTab, setActiveTab] = useState<'logs' | 'overview' | 'config'>('logs');
     const [details, setDetails] = useState<AppDetails | null>(null);
     const [loading, setLoading] = useState(false);
+    const [restarting, setRestarting] = useState(false);
+    const [restartSuccess, setRestartSuccess] = useState(false);
 
     useEffect(() => {
         if (activeTab === 'overview' || activeTab === 'config') {
@@ -60,6 +62,32 @@ export default function AppDetailView({ appName, initialStream, environment, onB
             console.error(e);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleRestart = async () => {
+        if (!confirm(`Are you sure you want to restart ${appName} in ${environment.toUpperCase()}? This will trigger a rolling update.`)) {
+            return;
+        }
+
+        setRestarting(true);
+        try {
+            const res = await fetch(`http://localhost:31191/api/apps/${appName}/restart?env=${environment}`, {
+                method: 'POST'
+            });
+            if (res.ok) {
+                setRestartSuccess(true);
+                setTimeout(() => setRestartSuccess(false), 5000);
+                // Refresh details after a delay to see the new deployment event
+                setTimeout(loadDetails, 2000);
+            } else {
+                alert('Failed to restart service');
+            }
+        } catch (e) {
+            console.error(e);
+            alert('Error triggering restart');
+        } finally {
+            setRestarting(false);
         }
     };
 
@@ -120,9 +148,30 @@ export default function AppDetailView({ appName, initialStream, environment, onB
                                 {/* Vital Signs Cards */}
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div className="bg-[#2d2d2d] p-5 rounded-xl border border-[#404040]">
-                                        <h3 className="text-gray-400 text-sm font-medium mb-2 flex items-center gap-2">
-                                            <Activity className="w-4 h-4" /> Service Status
-                                        </h3>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h3 className="text-gray-400 text-sm font-medium flex items-center gap-2">
+                                                <Activity className="w-4 h-4" /> Service Status
+                                            </h3>
+                                            <button
+                                                onClick={handleRestart}
+                                                disabled={restarting || restartSuccess}
+                                                className={cn(
+                                                    "flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-all",
+                                                    restartSuccess
+                                                        ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                                                        : "bg-[#333] hover:bg-[#444] text-gray-300 border border-[#404040]"
+                                                )}
+                                            >
+                                                {restarting ? (
+                                                    <div className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                                                ) : restartSuccess ? (
+                                                    <CheckCircle className="w-3 h-3" />
+                                                ) : (
+                                                    <RotateCcw className="w-3 h-3" />
+                                                )}
+                                                {restartSuccess ? 'Restart Triggered' : restarting ? 'Restarting...' : 'Restart Service'}
+                                            </button>
+                                        </div>
                                         <div className="flex items-center gap-3">
                                             <div className={cn("w-3 h-3 rounded-full", details.overview.runningCount > 0 ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" : "bg-red-500")} />
                                             <span className="text-2xl font-bold text-white">{details.overview.status}</span>

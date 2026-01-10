@@ -1,4 +1,4 @@
-import { ECSClient, DescribeServicesCommand, ListTasksCommand, DescribeTasksCommand, DescribeTaskDefinitionCommand } from '@aws-sdk/client-ecs';
+import { ECSClient, DescribeServicesCommand, ListTasksCommand, DescribeTasksCommand, DescribeTaskDefinitionCommand, UpdateServiceCommand } from '@aws-sdk/client-ecs';
 import { withAutoRetry, getECSClient } from './cloudwatch.js';
 import fs from 'fs';
 import path from 'path';
@@ -129,5 +129,30 @@ export async function getAppDetails(appName: string, env: 'qa' | 'dev'): Promise
                 }, {})
             }
         };
+    });
+}
+
+/**
+ * Trigger a force new deployment for a service
+ */
+export async function restartService(appName: string, env: 'qa' | 'dev'): Promise<boolean> {
+    const apps = allApps[env] || [];
+    const appConfig = apps.find((a: any) => a.name === appName || a.id === appName);
+
+    if (!appConfig) {
+        throw new Error(`App ${appName} not found in config for ${env}`);
+    }
+
+    return await withAutoRetry(async () => {
+        const ecs = await getECSClient();
+
+        const command = new UpdateServiceCommand({
+            cluster: appConfig.cluster,
+            service: appConfig.service,
+            forceNewDeployment: true
+        });
+
+        const response = await ecs.send(command);
+        return !!response.service;
     });
 }

@@ -140,6 +140,14 @@ const configPath = path.join(__dirname, '../config/applications.json');
 const allApps = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 
 /**
+ * Helper to get app configuration by name or ID
+ */
+export function getAppConfig(env: 'qa' | 'dev', identifier: string) {
+  const apps = allApps[env] || [];
+  return apps.find((a: any) => a.id === identifier || a.name === identifier);
+}
+
+/**
  * List all available apps for an environment
  */
 export async function listApps(env: 'qa' | 'dev' = 'qa') {
@@ -158,9 +166,11 @@ export async function listApps(env: 'qa' | 'dev' = 'qa') {
  * Optimized to find the latest active stream by time
  */
 export async function getStreamList(env: 'qa' | 'dev', appName: string): Promise<string[]> {
+  const config = getAppConfig(env, appName);
+  const logStreamPrefix = config?.logStreamPrefix || `ecs/${appName}`;
+  const logGroupName = config?.logGroup || LOG_GROUPS[env];
+
   return await withAutoRetry(async (client) => {
-    const logGroupName = LOG_GROUPS[env];
-    const logStreamPrefix = `ecs/${appName}`;
     let nextToken: string | undefined = undefined;
 
     // We want the LATEST stream for this app.
@@ -340,9 +350,11 @@ export async function fetchLatestLogs(
   limit: number = 500,
   startTime?: number
 ) {
+  const config = getAppConfig(env, appName);
+  const logStreamPrefix = config?.logStreamPrefix || `ecs/${appName}`;
+  const logGroupName = config?.logGroup || LOG_GROUPS[env];
+
   return await withAutoRetry(async (client) => {
-    const logGroupName = LOG_GROUPS[env];
-    const logStreamPrefix = `ecs/${appName}`;
     const allEvents = [];
     // Use provided startTime or default to last 24 hours
     const effectiveStartTime = startTime ?? (Date.now() - 24 * 60 * 60 * 1000);
@@ -395,7 +407,10 @@ export async function startLiveTail(
   onError: (err: any) => void,
   onClose: () => void
 ): Promise<() => void> {
-  const logGroupName = LOG_GROUPS[env];
+  const config = getAppConfig(env, appName);
+  const logStreamPrefix = config?.logStreamPrefix || `ecs/${appName}`;
+  const logGroupName = config?.logGroup || LOG_GROUPS[env];
+
   const abortController = new AbortController();
 
   try {
@@ -417,7 +432,7 @@ export async function startLiveTail(
 
     const command = new StartLiveTailCommand({
       logGroupIdentifiers: [cleanArn],
-      logStreamNamePrefixes: [`ecs/${appName}`], // Filter by app!
+      logStreamNamePrefixes: [logStreamPrefix], // Filter by app!
     });
     // Note: To use abortSignal with recent AWS SDK v3, pass it in the handler config or Client but for live tail specifically:
     // Some versions accept { abortSignal } in options.
