@@ -5,7 +5,7 @@ import { listApps, type App, AuthError } from './lib/cloudwatch'
 import Navbar from './components/navbar'
 import Sidebar from './components/sidebar'
 import LogViewer from './components/log-viewer'
-import AuthDialog from './components/auth-dialog'
+import RobustAuthDialog from './components/robust-auth-dialog'
 
 function AppComponent() {
   const [apps, setApps] = useState<App[]>([])
@@ -16,7 +16,7 @@ function AppComponent() {
   const [authError, setAuthError] = useState(false)
 
   // Fetch available apps directly from AWS
-  const fetchApps = useCallback(async () => {
+  const fetchApps = useCallback(async (): Promise<boolean> => {
     try {
       setLoading(true)
       const data = await listApps(environment)
@@ -25,11 +25,13 @@ function AppComponent() {
       if (data.length > 0 && !selectedApp) {
         setSelectedApp(data[0].name)
       }
+      return true // Success
     } catch (error) {
       console.error('Error fetching apps:', error)
       if (error instanceof AuthError) {
         setAuthError(true)
       }
+      return false // Failed
     } finally {
       setLoading(false)
     }
@@ -46,58 +48,58 @@ function AppComponent() {
     }
   }, [apps, selectedApp])
 
-  const handleRetryAuth = () => {
-    setAuthError(false)
-    fetchApps()
-  }
+  // Retry handler for auth dialog - returns true if auth succeeded
+  const handleRetryAuth = useCallback(async (): Promise<boolean> => {
+    return await fetchApps()
+  }, [fetchApps])
 
   return (
     <>
-      <AuthDialog isOpen={authError} onRetry={handleRetryAuth} />
+      <RobustAuthDialog isOpen={authError} onRetry={handleRetryAuth} />
       <div className="flex h-screen flex-col bg-background text-foreground">
-      {/* Navbar */}
-      <Navbar
-        environment={environment}
-        onEnvironmentChange={setEnvironment}
-        onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
-      />
-
-      {/* Main Content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <Sidebar
-          apps={apps}
-          selectedApp={selectedApp}
-          onAppSelect={setSelectedApp}
-          collapsed={sidebarCollapsed}
-          loading={loading}
+        {/* Navbar */}
+        <Navbar
+          environment={environment}
+          onEnvironmentChange={setEnvironment}
+          onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
 
-        {/* Log Viewer */}
-        <main
-          className={cn(
-            'flex-1 overflow-hidden',
-            sidebarCollapsed ? 'ml-16' : 'ml-64'
-          )}
-        >
-          {selectedApp ? (
-            <LogViewer
-              appName={selectedApp}
-              appDisplayName={apps.find(a => a.name === selectedApp)?.displayName || selectedApp}
-              environment={environment}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-muted-foreground">
-              <div className="text-center">
-                <Database className="mx-auto mb-4 h-16 w-16 opacity-50" />
-                <p className="text-lg">No apps available</p>
-                <p className="text-sm">Make sure you've run `peacock security` to authenticate with AWS</p>
+        {/* Main Content */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Sidebar */}
+          <Sidebar
+            apps={apps}
+            selectedApp={selectedApp}
+            onAppSelect={setSelectedApp}
+            collapsed={sidebarCollapsed}
+            loading={loading}
+          />
+
+          {/* Log Viewer */}
+          <main
+            className={cn(
+              'flex-1 overflow-hidden',
+              sidebarCollapsed ? 'ml-16' : 'ml-64'
+            )}
+          >
+            {selectedApp ? (
+              <LogViewer
+                appName={selectedApp}
+                appDisplayName={apps.find(a => a.name === selectedApp)?.displayName || selectedApp}
+                environment={environment}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center text-muted-foreground">
+                <div className="text-center">
+                  <Database className="mx-auto mb-4 h-16 w-16 opacity-50" />
+                  <p className="text-lg">No apps available</p>
+                  <p className="text-sm">Make sure you've run `peacock security` to authenticate with AWS</p>
+                </div>
               </div>
-            </div>
-          )}
-        </main>
+            )}
+          </main>
+        </div>
       </div>
-    </div>
     </>
   )
 }

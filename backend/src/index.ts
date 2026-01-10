@@ -71,14 +71,15 @@ app.get('/api/streams', async (req, res) => {
  */
 app.get('/api/logs/latest', async (req, res) => {
   try {
-    const { app, env = 'qa', limit = '500' } = req.query;
+    const { app, env = 'qa', limit = '500', startTime } = req.query;
     if (!app || typeof app !== 'string') {
       return res.status(400).json({ error: 'app parameter is required' });
     }
     const logs = await cloudwatch.fetchLatestLogs(
       env === 'dev' ? 'dev' : 'qa',
       app,
-      Number(limit)
+      Number(limit),
+      startTime ? Number(startTime) : undefined
     );
     res.json({ logs });
   } catch (error: any) {
@@ -101,7 +102,7 @@ app.get('/api/logs/latest', async (req, res) => {
  */
 app.post('/api/logs/stream', async (req, res) => {
   try {
-    const { streamName, env = 'qa', startTime, limit = 1000 } = req.body;
+    const { streamName, env = 'qa', startTime, limit } = req.body;
     if (!streamName || typeof streamName !== 'string') {
       return res.status(400).json({ error: 'streamName parameter is required' });
     }
@@ -109,7 +110,7 @@ app.post('/api/logs/stream', async (req, res) => {
       env === 'dev' ? 'dev' : 'qa',
       streamName,
       startTime ? Number(startTime) : undefined,
-      Number(limit)
+      limit ? Number(limit) : undefined
     );
     res.json({ logs });
   } catch (error: any) {
@@ -152,6 +153,135 @@ app.post('/api/logs/poll', async (req, res) => {
       requiresAuth: isAuthError,
     });
   }
+});
+
+// ... (previous endpoints)
+
+
+/**
+ * GET /api/logs/streams
+ * Get list of log streams for an app (optimized to find latest)
+ */
+app.get('/api/logs/streams', async (req, res) => {
+  try {
+    const { app, env = 'qa' } = req.query;
+    if (!app || typeof app !== 'string') {
+      return res.status(400).json({ error: 'App name required' });
+    }
+    const streams = await cloudwatch.getStreamList(env as 'qa' | 'dev', app);
+    res.json(streams);
+  } catch (error: any) {
+    const isAuthError = error.name === 'ExpiredTokenException' ||
+      error.message?.includes('security token') ||
+      error.message?.includes('credentials');
+    res.status(isAuthError ? 401 : 500).json({
+      error: isAuthError ? 'AWS credentials expired' : 'Failed to fetch streams',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      requiresAuth: isAuthError
+    });
+  }
+});
+
+/**
+ * POST /api/logs/stream/events
+ * Get logs using native GetLogEvents (better for pagination)
+ * Body: { streamName, env, limit?, startFromHead?, nextToken? }
+ */
+app.post('/api/logs/stream/events', async (req, res) => {
+  try {
+    const { streamName, env = 'qa', limit = 1000, startFromHead = false, nextToken } = req.body;
+
+    // Debug logging
+    console.log(`[POST /stream/events] app=${streamName} startFromHead=${startFromHead} (${typeof startFromHead}) nextToken=${nextToken ? 'YES' : 'NO'}`);
+
+    if (!streamName || typeof streamName !== 'string') {
+      return res.status(400).json({ error: 'streamName parameter is required' });
+    }
+
+    // Ensure strict boolean
+    const isStartFromHead = startFromHead === true || startFromHead === 'true';
+
+    const result = await cloudwatch.getLogEvents(
+      env === 'dev' ? 'dev' : 'qa',
+      streamName,
+      Number(limit),
+      isStartFromHead,
+      nextToken
+    );
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error fetching log events:', error);
+    const isAuthError = error.name === 'ExpiredTokenException' ||
+      error.message?.includes('security token') ||
+      error.message?.includes('credentials');
+    res.status(isAuthError ? 401 : 500).json({
+      error: isAuthError ? 'AWS credentials expired' : 'Failed to fetch log events',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      requiresAuth: isAuthError,
+    });
+  }
+});
+
+
+
+/**
+ * GET /api/logs/live
+ * Server-Sent Events (SSE) endpoint for Live Tail
+ */
+app.get('/api/logs/live', async (req, res) => {
+  const { app, env = 'qa' } = req.query;
+
+  if (!app || typeof app !== 'string') {
+    return res.status(400).json({ error: 'App name required' });
+  }
+
+  // Set SSE headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+
+  // Send initial "connected" message
+  res.write(`data: ${JSON.stringify({ type: 'connected', message: 'Connected to Live Tail...' })}\n\n`);
+
+  const cleanup = await cloudwatch.startLiveTail(
+    env === 'dev' ? 'dev' : 'qa',
+    app,
+    (logs) => {
+      // Send logs to client
+      if (logs && logs.length > 0) {
+        const payload = {
+          type: 'logs',
+          events: logs.map((l: any) => ({
+            timestamp: l.timestamp,
+            message: l.message,
+            stream: l.logStreamName
+          }))
+        };
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      }
+    },
+    (err) => {
+      console.error('Live Tail Error:', err);
+      const errPayload = {
+        type: 'error',
+        message: err.message || 'Unknown error'
+      };
+      res.write(`data: ${JSON.stringify(errPayload)}\n\n`);
+      // Do not close connection immediately, let client decide or retry
+    },
+    () => {
+      console.log('Live Tail stream closed');
+      res.end();
+    }
+  );
+
+  // Clean up when client disconnects
+  req.on('close', () => {
+    console.log('Client disconnected, stopping Live Tail');
+    cleanup();
+  });
 });
 
 // Start server

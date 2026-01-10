@@ -1,11 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Search, Trash2, Loader2 } from 'lucide-react'
-import { Input } from './ui/input'
-import { Button } from './ui/button'
-import { ScrollArea } from './ui/scroll-area'
-import { Badge } from './ui/badge'
 import { useAppLogsManager, type AppLogsState } from '@/hooks/useAppLogsManager'
-import { cn } from '@/lib/utils'
 
 interface LogViewerProps {
   appName: string
@@ -23,6 +18,17 @@ export default function LogViewer({ appName, appDisplayName, environment }: LogV
 
   const { initializeApp, getAppLogs, clearAppLogs, clearAllPolling } = useAppLogsManager()
 
+  // Helper to format timestamp
+  const formatTime = (timestamp: number) => {
+    return new Date(timestamp).toLocaleTimeString('en-US', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      fractionalSecondDigits: 3,
+    })
+  }
+
   // Clear all polling when environment changes
   useEffect(() => {
     return () => {
@@ -38,10 +44,6 @@ export default function LogViewer({ appName, appDisplayName, environment }: LogV
 
   // Get current log state
   const logState: AppLogsState = getAppLogs(appName, environment)
-
-  // Check if there are more streams to load in background
-  const hasMoreStreams = logState.streams.some((s, i) => i > 0 && !s.loaded)
-  const isLoadingOlder = logState.streams.some((s, i) => i > 0 && s.loading)
 
   // Scroll to bottom when initial load completes
   useEffect(() => {
@@ -73,105 +75,94 @@ export default function LogViewer({ appName, appDisplayName, environment }: LogV
   )
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-col h-full bg-[#1e1e1e] text-gray-300 font-mono text-sm">
       {/* Header */}
-      <div className="flex items-center justify-between border-b bg-muted/40 px-4 py-2">
-        <div className="flex items-center gap-2">
-          <h2 className="font-semibold">{appDisplayName}</h2>
-          <Badge variant="outline" className="text-xs">
-            {appName}
-          </Badge>
-          <Badge variant="secondary" className="text-xs">
-            {filteredLogs.length} {filteredLogs.length === 1 ? 'log' : 'logs'}
-          </Badge>
-          {logState.loading && (
-            <Badge variant="outline" className="gap-1">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Loading
-            </Badge>
-          )}
-          {isLoadingOlder && (
-            <Badge variant="outline" className="gap-1">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Loading older logs...
-            </Badge>
-          )}
-          {hasMoreStreams && !logState.loading && !isLoadingOlder && (
-            <Badge variant="outline" className="text-xs text-muted-foreground">
-              Loading more streams...
-            </Badge>
-          )}
-          {!hasMoreStreams && logState.streams.length > 1 && !logState.loading && !isLoadingOlder && (
-            <Badge variant="outline" className="text-xs text-muted-foreground">
-              All streams loaded
-            </Badge>
-          )}
+      <div className="flex items-center justify-between px-4 py-2 bg-[#2d2d2d] border-b border-[#404040]">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-white">{appDisplayName}</span>
+            <span className="text-xs px-2 py-0.5 rounded bg-[#404040] text-gray-400">
+              {environment.toUpperCase()}
+            </span>
+          </div>
+          {/* Connection Status */}
+          <div className="flex items-center gap-2 text-xs">
+            {logState.connected ? (
+              <span className="flex items-center gap-1 text-green-400">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                POLLING ACTIVE (v2)
+              </span>
+            ) : logState.loading ? (
+              <span className="text-yellow-400">Connecting...</span>
+            ) : logState.error ? (
+              <span className="text-red-400">Disconnected</span>
+            ) : (
+              <span className="text-gray-500">Offline</span>
+            )}
+            <span className="text-gray-500 ml-2">
+              {filteredLogs.length} events
+            </span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {logState.logs.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={() => clearAppLogs(appName, environment)} className="gap-1">
-              <Trash2 className="h-4 w-4" />
-              Clear
-            </Button>
-          )}
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+            <input
+              type="text"
+              placeholder="Filter logs..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-64 bg-[#1e1e1e] border border-[#404040] rounded pl-8 pr-3 py-1 text-xs focus:outline-none focus:border-blue-500 transition-colors"
+            />
+          </div>
+
+          <button
+            onClick={() => clearAppLogs(appName, environment)}
+            className="p-1.5 hover:bg-[#404040] rounded transition-colors text-gray-400 hover:text-white"
+            title="Clear Logs"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
-      {/* Search Bar */}
-      <div className="border-b bg-muted/20 px-4 py-2">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="text"
-            placeholder="Search logs..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-      </div>
+      {/* Log Content */}
+      <div
+        ref={scrollAreaRef}
+        className="flex-1 overflow-auto p-4 space-y-0.5 custom-scrollbar"
+        onScroll={handleScroll}
+      >
+        {logState.loading && logState.logs.length === 0 && (
+          <div className="flex items-center justify-center py-8 text-gray-500">
+            <Loader2 className="w-6 h-6 animate-spin mr-2" />
+            <span>Connecting to Live Tail...</span>
+          </div>
+        )}
 
-      {/* Logs */}
-      <ScrollArea ref={scrollAreaRef} className="flex-1" onScroll={handleScroll}>
-        <div className="space-y-0 p-4 font-mono text-sm">
-          {logState.loading && logState.logs.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-muted-foreground">
-              <div className="text-center">
-                <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin" />
-                <p>Loading logs...</p>
-              </div>
-            </div>
-          ) : logState.error ? (
-            <div className="flex h-full items-center justify-center text-destructive">
-              <div className="text-center">
-                <p className="font-semibold">Error loading logs</p>
-                <p className="text-sm">{logState.error}</p>
-              </div>
-            </div>
-          ) : filteredLogs.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-muted-foreground">
-              {searchQuery ? 'No logs match your search' : 'No logs available'}
-            </div>
-          ) : (
-            <>
-              {filteredLogs.map((log, index) => (
-                <div
-                  key={`${log.timestamp}-${log.stream}-${index}`}
-                  className={cn(
-                    'rounded px-3 py-1 hover:bg-muted/50',
-                    log.message.includes('ERROR') && 'bg-red-500/5',
-                    log.message.includes('WARN') && 'bg-yellow-500/5'
-                  )}
-                >
-                  <pre className="whitespace-pre-wrap break-words font-mono text-sm">{log.message}</pre>
-                </div>
-              ))}
-            </>
-          )}
-        </div>
+        {logState.error && (
+          <div className="p-4 mb-4 bg-red-900/20 border border-red-900/50 rounded text-red-400 text-xs">
+            Error: {logState.error}
+          </div>
+        )}
+
+        {filteredLogs.map((log, index) => (
+          <div
+            key={`${log.timestamp}-${index}`}
+            className="hover:bg-[#2d2d2d] px-2 py-0.5 rounded leading-relaxed break-all flex gap-3 group"
+          >
+            <span className="text-gray-500 shrink-0 select-none w-36 text-xs tabular-nums opacity-70 group-hover:opacity-100 transition-opacity">
+              {formatTime(log.timestamp)}
+            </span>
+            <span className="text-gray-300">
+              {log.message}
+            </span>
+          </div>
+        ))}
+
+        {/* End anchor */}
         <div ref={scrollRef} />
-      </ScrollArea>
+      </div>
     </div>
   )
 }

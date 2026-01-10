@@ -1,8 +1,12 @@
 import {
   CloudWatchLogsClient,
   DescribeLogStreamsCommand,
+  DescribeLogGroupsCommand,
   FilterLogEventsCommand,
+  GetLogEventsCommand,
+  StartLiveTailCommand,
 } from '@aws-sdk/client-cloudwatch-logs';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 
 const LOG_GROUPS = {
   qa: 'custom-apps-pam-cloudwatch-qa',
@@ -35,11 +39,18 @@ const APP_PREFIXES = [
 ];
 
 /**
- * Get a fresh CloudWatch client (reads credentials from current environment)
- * This allows picking up new credentials after running `peacock security`
+ * Get a fresh CloudWatch client - ALWAYS reads fresh credentials
+ * Uses fromNodeProviderChain() which reads from:
+ * 1. Environment variables (AWS_ACCESS_KEY_ID, etc.)
+ * 2. Shared credentials file (~/.aws/credentials) with AWS_PROFILE
+ * 3. Other providers in the default chain
+ * This is completely stateless - creates fresh credentials on each call
  */
 function getClient(): CloudWatchLogsClient {
-  return new CloudWatchLogsClient({ region: 'us-east-1' });
+  return new CloudWatchLogsClient({
+    region: 'us-east-1',
+    credentials: fromNodeProviderChain(), // Uses full default credential chain
+  });
 }
 
 /**
@@ -72,8 +83,19 @@ async function withAutoRetry<T>(
     return await fn(client);
   } catch (error: any) {
     if (isAuthError(error)) {
-      console.log('⚠️  AWS credentials expired, retrying with fresh credentials...');
-      // Create a fresh client that will read new credentials from environment
+      console.log('⚠️  AWS credentials expired.');
+
+      // Check for stale environment variables which might block reading from updated ~/.aws/credentials
+      if (process.env.AWS_ACCESS_KEY_ID) {
+        console.log('🔄 Detected AWS Environment Variables. Clearing them to force fallback to shared credentials file...');
+        delete process.env.AWS_ACCESS_KEY_ID;
+        delete process.env.AWS_SECRET_ACCESS_KEY;
+        delete process.env.AWS_SESSION_TOKEN;
+        delete process.env.AWS_SECURITY_TOKEN;
+      }
+
+      console.log('Retrying with fresh client...');
+      // Create a fresh client that will read new credentials from file/provider
       client = getClient();
       return await fn(client);
     }
@@ -124,42 +146,47 @@ export async function listApps(env: 'qa' | 'dev' = 'qa') {
 }
 
 /**
- * Get all log streams for an app, sorted by last event time (most recent first)
+ * Get the latest log stream for an app
+ * Optimized to find the latest active stream by time
  */
 export async function getStreamList(env: 'qa' | 'dev', appName: string): Promise<string[]> {
   return await withAutoRetry(async (client) => {
     const logGroupName = LOG_GROUPS[env];
     const logStreamPrefix = `ecs/${appName}`;
-    const streams: { name: string; lastEventTime?: number }[] = [];
     let nextToken: string | undefined = undefined;
 
-    // Use logStreamNamePrefix for efficient filtering, then sort by lastEventTime
-    do {
+    // We want the LATEST stream for this app.
+    // AWS doesn't support 'orderBy: LastEventTime' combined with 'logStreamNamePrefix'.
+    // Strategy: Fetch streams ordered by LastEventTime (globally for the group) and find the first one matching our prefix.
+    // We scan up to 5 pages (250 streams) which covers most active scenarios.
+
+    for (let i = 0; i < 5; i++) {
       const command = new DescribeLogStreamsCommand({
         logGroupName,
-        logStreamNamePrefix: logStreamPrefix,
+        // No prefix, so we can sort by time
+        orderBy: 'LastEventTime',
+        descending: true,
         limit: 50,
         nextToken,
       });
 
       const response = await client.send(command);
+      const streams = response.logStreams || [];
 
-      for (const stream of response.logStreams || []) {
-        if (stream.logStreamName) {
-          streams.push({
-            name: stream.logStreamName,
-            lastEventTime: stream.lastEventTime,
-          });
-        }
+      // Find the first stream that matches our app
+      const match = streams.find(s => s.logStreamName && s.logStreamName.startsWith(logStreamPrefix));
+
+      if (match && match.logStreamName) {
+        return [match.logStreamName];
       }
 
       nextToken = response.nextToken;
-    } while (nextToken);
+      if (!nextToken) break;
+    }
 
-    // Sort by lastEventTime descending (most recent first)
-    streams.sort((a, b) => (b.lastEventTime || 0) - (a.lastEventTime || 0));
-
-    return streams.map(s => s.name);
+    // If we didn't find it in the top 250 active streams, fallback to prefix search (slower/unordered) 
+    // or just return empty. Let's return empty for now as it implies the app hasn't been active recently.
+    return [];
   });
 }
 
@@ -170,38 +197,87 @@ export async function fetchLogsFromStream(
   env: 'qa' | 'dev',
   streamName: string,
   startTime?: number,
-  limit: number = 1000
+  limit?: number
 ) {
   try {
     return await withAutoRetry(async (client) => {
       const logGroupName = LOG_GROUPS[env];
-      const allEvents = [];
+      const allEvents: { timestamp: number; stream: string; message: string }[] = [];
+      let nextToken: string | undefined = undefined;
 
-      const command = new FilterLogEventsCommand({
-        logGroupName,
-        logStreamNames: [streamName],
-        startTime,
-        limit,
-      });
+      // Loop to fetch all logs (or up to limit if specified)
+      do {
+        const command = new FilterLogEventsCommand({
+          logGroupName,
+          logStreamNames: [streamName],
+          startTime,
+          limit: limit || undefined, // If limit not specified, AWS default is used, but we handle pagination
+          nextToken,
+        });
 
-      const response = await client.send(command);
+        const response = await client.send(command);
 
-      for (const event of response.events || []) {
-        if (event.timestamp && event.message) {
-          allEvents.push({
-            timestamp: event.timestamp,
-            stream: event.logStreamName || '',
-            message: event.message,
-          });
+        for (const event of response.events || []) {
+          if (event.timestamp && event.message) {
+            allEvents.push({
+              timestamp: event.timestamp,
+              stream: event.logStreamName || '',
+              message: event.message,
+            });
+          }
         }
-      }
+
+        nextToken = response.nextToken;
+
+        // If limit was specified and we reached it, stop
+        // (Note: this is a loose limit check, strict limit would require counting)
+        if (limit && allEvents.length >= limit) {
+          break;
+        }
+
+      } while (nextToken);
 
       return allEvents.sort((a, b) => a.timestamp - b.timestamp);
     });
-  } catch (error) {
-    console.warn(`Failed to fetch from stream ${streamName}:`, error);
+  } catch (err) {
+    console.error('Error fetching logs from stream:', err);
     return [];
   }
+}
+
+/**
+ * Get logs using GetLogEventsCommand (better for polling/pagination)
+ */
+export async function getLogEvents(
+  env: 'qa' | 'dev',
+  streamName: string,
+  limit: number = 1000,
+  startFromHead: boolean = false,
+  nextToken?: string
+) {
+  return await withAutoRetry(async (client) => {
+    const logGroupName = LOG_GROUPS[env];
+    const command = new GetLogEventsCommand({
+      logGroupName,
+      logStreamName: streamName,
+      limit,
+      startFromHead,
+      nextToken,
+    });
+
+    const response = await client.send(command);
+
+    return {
+      events: (response.events || []).map(e => ({
+        timestamp: e.timestamp || 0,
+        message: e.message || '',
+        ingestionTime: e.ingestionTime,
+        stream: streamName
+      })),
+      nextForwardToken: response.nextForwardToken,
+      nextBackwardToken: response.nextBackwardToken
+    };
+  });
 }
 
 /**
@@ -248,23 +324,25 @@ export async function fetchNewLogsFromStreams(
 }
 
 /**
- * Initial load: Get latest logs from the last 24 hours
+ * Initial load: Get latest logs from the last 24 hours (or since startTime)
  */
 export async function fetchLatestLogs(
   env: 'qa' | 'dev',
   appName: string,
-  limit: number = 500
+  limit: number = 500,
+  startTime?: number
 ) {
   return await withAutoRetry(async (client) => {
     const logGroupName = LOG_GROUPS[env];
     const logStreamPrefix = `ecs/${appName}`;
     const allEvents = [];
-    const startTime = Date.now() - 24 * 60 * 60 * 1000; // Last 24 hours
+    // Use provided startTime or default to last 24 hours
+    const effectiveStartTime = startTime ?? (Date.now() - 24 * 60 * 60 * 1000);
 
     const command = new FilterLogEventsCommand({
       logGroupName,
       logStreamNamePrefix: logStreamPrefix,
-      startTime,
+      startTime: effectiveStartTime,
       limit,
     });
 
@@ -282,4 +360,93 @@ export async function fetchLatestLogs(
 
     return allEvents.sort((a, b) => a.timestamp - b.timestamp);
   });
+}
+
+/**
+ * Helper to get Log Group ARN
+ */
+async function getLogGroupArn(client: CloudWatchLogsClient, logGroupName: string): Promise<string | undefined> {
+  const command = new DescribeLogGroupsCommand({
+    logGroupNamePrefix: logGroupName,
+    limit: 1,
+  });
+  const response = await client.send(command);
+  // Find exact match
+  const group = response.logGroups?.find(g => g.logGroupName === logGroupName);
+  return group?.arn; // Format: arn:aws:logs:region:account:log-group:name:*
+}
+
+/**
+ * Start a Live Tail session via SSE
+ * Returns a cleanup function
+ */
+export async function startLiveTail(
+  env: 'qa' | 'dev',
+  appName: string,
+  onEvent: (event: any) => void,
+  onError: (err: any) => void,
+  onClose: () => void
+): Promise<() => void> {
+  const logGroupName = LOG_GROUPS[env];
+  const abortController = new AbortController();
+
+  try {
+    // 1. Get ARN
+    // This call uses withAutoRetry, which includes the "Smart Recovery" logic (clearing stale env vars).
+    // So if auth fails here, it will clean up process.env before we create the streaming client.
+    const logGroupArn = await withAutoRetry(async (c) => getLogGroupArn(c, logGroupName));
+
+    if (!logGroupArn) {
+      onError(new Error(`Log group ARN not found for ${logGroupName}`));
+      return () => { };
+    }
+
+    // 2. Create client AFTER ARN check (so it picks up any env changes from withAutoRetry)
+    const client = getClient();
+
+    // Remove :* suffix if present (sometimes ARN has it)
+    const cleanArn = logGroupArn.endsWith(':*') ? logGroupArn.slice(0, -2) : logGroupArn;
+
+    const command = new StartLiveTailCommand({
+      logGroupIdentifiers: [cleanArn],
+      logStreamNamePrefixes: [`ecs/${appName}`], // Filter by app!
+    });
+    // Note: To use abortSignal with recent AWS SDK v3, pass it in the handler config or Client but for live tail specifically:
+    // Some versions accept { abortSignal } in options.
+    // However, destroying the client is the surest way if signal isn't supported on command level.
+    // The command itself works with client.send(command, { abortSignal })
+
+    const response = await client.send(command, { abortSignal: abortController.signal });
+
+    // Handle the stream
+    const processStream = async () => {
+      try {
+        if (response.responseStream) {
+          for await (const event of response.responseStream) {
+            if (event.sessionUpdate) {
+              const logs = event.sessionUpdate.sessionResults || [];
+              onEvent(logs);
+            } else if (event.sessionTimeout) {
+              onError(new Error('Live tail session timed out'));
+            }
+          }
+        }
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          onError(err);
+        }
+      } finally {
+        onClose();
+      }
+    };
+
+    processStream();
+
+    return () => {
+      abortController.abort();
+    };
+  } catch (err) {
+    onError(err);
+    return () => { };
+  }
 }
