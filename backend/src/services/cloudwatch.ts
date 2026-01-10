@@ -106,7 +106,11 @@ export async function withAutoRetry<T>(
     return await fn(client);
   } catch (error: any) {
     if (isAuthError(error)) {
-      console.log('⚠️  AWS credentials expired.');
+      console.log('⚠️  AWS credentials expired. Invalidating client cache...');
+
+      // Invalidate both clients to force fresh creation on next attempt
+      cwClient = null;
+      ecsClient = null;
 
       // Check for stale environment variables which might block reading from updated ~/.aws/credentials
       if (process.env.AWS_ACCESS_KEY_ID) {
@@ -145,6 +149,24 @@ const allApps = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 export function getAppConfig(env: 'qa' | 'dev', identifier: string) {
   const apps = allApps[env] || [];
   return apps.find((a: any) => a.id === identifier || a.name === identifier);
+}
+
+/**
+ * Check if AWS credentials are valid
+ */
+export async function checkAuth(): Promise<boolean> {
+  try {
+    await withAutoRetry(async (client) => {
+      await client.send(new DescribeLogGroupsCommand({ limit: 1 }));
+    });
+    return true;
+  } catch (error) {
+    console.error('Auth check failed:', error);
+    // On auth failure, insure the clients are cleared so next heartbeat checks again with fresh state
+    cwClient = null;
+    ecsClient = null;
+    return false;
+  }
 }
 
 /**

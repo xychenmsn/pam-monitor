@@ -6,9 +6,10 @@ import { cn } from '@/lib/utils'
 interface DashboardProps {
     environment: 'qa' | 'dev'
     onAppSelect: (appName: string, initialStream?: string) => void
+    isAuthError?: boolean
 }
 
-export default function Dashboard({ environment, onAppSelect }: DashboardProps) {
+export default function Dashboard({ environment, onAppSelect, isAuthError }: DashboardProps) {
     const [status, setStatus] = useState<AppDashboardStatus[]>([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
@@ -70,7 +71,17 @@ export default function Dashboard({ environment, onAppSelect }: DashboardProps) 
                 </div>
             </div>
 
-            {error && (
+            {isAuthError && (
+                <div className="mb-6 p-4 bg-yellow-900/20 border border-yellow-900/50 rounded-lg flex items-center gap-3 text-yellow-400">
+                    <AlertCircle className="w-5 h-5" />
+                    <div>
+                        <p className="font-semibold">AWS Connection Required</p>
+                        <p className="text-sm opacity-80">Real-time status and ECS data are currently unavailable. Please re-authenticate.</p>
+                    </div>
+                </div>
+            )}
+
+            {error && !isAuthError && (
                 <div className="mb-6 p-4 bg-red-900/20 border border-red-900/50 rounded-lg flex items-center gap-3 text-red-400">
                     <AlertCircle className="w-5 h-5" />
                     <span>{error}</span>
@@ -91,15 +102,16 @@ export default function Dashboard({ environment, onAppSelect }: DashboardProps) 
                             </span>
                             <div className={cn(
                                 "flex items-center gap-2 px-2 py-1 rounded-full text-xs font-medium",
-                                app.ecsStatus?.runningCount ? "bg-green-900/30 text-green-400 border border-green-900/50" : "bg-red-900/30 text-red-400 border border-red-900/50"
+                                isAuthError ? "bg-gray-800 text-gray-400 border border-gray-700" :
+                                    app.ecsStatus?.runningCount ? "bg-green-900/30 text-green-400 border border-green-900/50" : "bg-red-900/30 text-red-400 border border-red-900/50"
                             )}>
                                 <div className={cn(
                                     "w-1.5 h-1.5 rounded-full",
-                                    app.ecsStatus?.runningCount ? "bg-green-400 animate-pulse" : "bg-red-400"
+                                    isAuthError ? "bg-gray-500" :
+                                        app.ecsStatus?.runningCount ? "bg-green-400 animate-pulse" : "bg-red-400"
                                 )} />
-                                {app.ecsStatus ?
-                                    (app.ecsStatus.runningCount > 0 ? "RUNNING" : "STOPPED")
-                                    : "UNKNOWN"}
+                                {isAuthError ? "OFFLINE" :
+                                    app.ecsStatus ? (app.ecsStatus.runningCount > 0 ? "RUNNING" : "STOPPED") : "UNKNOWN"}
                             </div>
                         </div>
 

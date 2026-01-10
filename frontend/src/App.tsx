@@ -1,13 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Database } from 'lucide-react'
 import { cn } from './lib/utils'
-import { listApps, type App, AuthError } from './lib/cloudwatch'
+import { listApps, type App } from './lib/cloudwatch'
 import Navbar from './components/navbar'
 import Sidebar from './components/sidebar'
-import LogViewer from './components/log-viewer'
 import Dashboard from './components/dashboard'
 import AppDetailView from './components/app-detail-view'
 import RobustAuthDialog from './components/robust-auth-dialog'
+import { useAuthHeartbeat } from './hooks/useAuthHeartbeat'
 
 function AppComponent() {
   const [apps, setApps] = useState<App[]>([])
@@ -16,7 +15,7 @@ function AppComponent() {
   const [environment, setEnvironment] = useState<'qa' | 'dev'>('qa')
   const [loading, setLoading] = useState(true)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [authError, setAuthError] = useState(false)
+  const { isAuthError, check: retryAuth } = useAuthHeartbeat(30000)
 
   // Fetch available apps directly from AWS
   const fetchApps = useCallback(async (): Promise<boolean> => {
@@ -24,19 +23,14 @@ function AppComponent() {
       setLoading(true)
       const data = await listApps(environment)
       setApps(data)
-      setAuthError(false)
-
       return true // Success
     } catch (error) {
       console.error('Error fetching apps:', error)
-      if (error instanceof AuthError) {
-        setAuthError(true)
-      }
       return false // Failed
     } finally {
       setLoading(false)
     }
-  }, [environment, selectedApp])
+  }, [environment])
 
   useEffect(() => {
     fetchApps()
@@ -50,11 +44,6 @@ function AppComponent() {
     }
   }, [apps, selectedApp])
 
-  // Retry handler for auth dialog - returns true if auth succeeded
-  const handleRetryAuth = useCallback(async (): Promise<boolean> => {
-    return await fetchApps()
-  }, [fetchApps])
-
   const handleAppSelect = (appName: string, stream?: string) => {
     setSelectedApp(appName)
     setInitialStream(stream)
@@ -62,7 +51,7 @@ function AppComponent() {
 
   return (
     <>
-      <RobustAuthDialog isOpen={authError} onRetry={handleRetryAuth} />
+      <RobustAuthDialog isOpen={isAuthError} onRetry={retryAuth} />
       <div className="flex h-screen flex-col bg-background text-foreground">
         {/* Navbar */}
         <Navbar
@@ -98,11 +87,13 @@ function AppComponent() {
                   setSelectedApp('')
                   setInitialStream(undefined)
                 }}
+                isAuthError={isAuthError}
               />
             ) : (
               <Dashboard
                 environment={environment}
                 onAppSelect={handleAppSelect}
+                isAuthError={isAuthError}
               />
             )}
           </main>

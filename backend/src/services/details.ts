@@ -40,6 +40,18 @@ export interface AppDetail {
         memory: string;
         environment: Record<string, string>;
     };
+    deployments: {
+        id: string;
+        status: string;
+        taskDefinition: string;
+        desiredCount: number;
+        pendingCount: number;
+        runningCount: number;
+        rolloutState?: string;
+        rolloutStateReason?: string;
+        createdAt: Date;
+        updatedAt: Date;
+    }[];
 }
 
 export async function getAppDetails(appName: string, env: 'qa' | 'dev'): Promise<AppDetail | null> {
@@ -127,7 +139,19 @@ export async function getAppDetails(appName: string, env: 'qa' | 'dev'): Promise
                     acc[curr.name] = curr.value;
                     return acc;
                 }, {})
-            }
+            },
+            deployments: (service.deployments || []).map((d: any) => ({
+                id: d.id,
+                status: d.status,
+                taskDefinition: d.taskDefinition,
+                desiredCount: d.desiredCount || 0,
+                pendingCount: d.pendingCount || 0,
+                runningCount: d.runningCount || 0,
+                rolloutState: d.rolloutState,
+                rolloutStateReason: d.rolloutStateReason,
+                createdAt: d.createdAt,
+                updatedAt: d.updatedAt
+            }))
         };
     });
 }

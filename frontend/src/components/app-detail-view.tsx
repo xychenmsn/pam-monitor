@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Activity, Box, Settings, FileText, CheckCircle, Clock, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Activity, Box, Settings, FileText, CheckCircle, Clock, RotateCcw, Shield, Layers, AlertCircle } from 'lucide-react';
 import LogViewer from './log-viewer';
 import { cn } from '@/lib/utils';
 
@@ -8,6 +8,7 @@ interface AppDetailViewProps {
     initialStream?: string;
     environment: 'qa' | 'dev';
     onBack: () => void;
+    isAuthError?: boolean;
 }
 
 interface AppDetails {
@@ -32,31 +33,47 @@ interface AppDetails {
         ip?: string;
     }[];
     configuration: {
+        taskDefinitionArn: string;
         image: string;
         cpu: string;
         memory: string;
         environment: Record<string, string>;
     };
+    deployments: {
+        id: string;
+        status: string;
+        taskDefinition: string;
+        desiredCount: number;
+        pendingCount: number;
+        runningCount: number;
+        rolloutState?: string;
+        rolloutStateReason?: string;
+        createdAt: string;
+        updatedAt: string;
+    }[];
 }
 
-export default function AppDetailView({ appName, initialStream, environment, onBack }: AppDetailViewProps) {
-    const [activeTab, setActiveTab] = useState<'logs' | 'events' | 'config'>('logs');
+export default function AppDetailView({ appName, initialStream, environment, onBack, isAuthError }: AppDetailViewProps) {
+    const [activeTab, setActiveTab] = useState<'logs' | 'infra' | 'events' | 'config'>('logs');
     const [details, setDetails] = useState<AppDetails | null>(null);
     const [loading, setLoading] = useState(false);
     const [restarting, setRestarting] = useState(false);
     const [restartSuccess, setRestartSuccess] = useState(false);
 
     useEffect(() => {
+        if (isAuthError) return;
         loadDetails();
         // Set up polling for vitals
         const interval = setInterval(loadDetails, 30000);
         return () => clearInterval(interval);
-    }, [appName, environment]);
+    }, [appName, environment, isAuthError]);
 
     const loadDetails = async () => {
+        if (isAuthError) return;
         setLoading(true);
         try {
             const res = await fetch(`http://localhost:31191/api/apps/${appName}/details?env=${environment}`);
+            if (!res.ok) throw new Error('Failed to fetch details');
             const data = await res.json();
             setDetails(data);
         } catch (e) {
@@ -107,7 +124,17 @@ export default function AppDetailView({ appName, initialStream, environment, onB
 
             {/* Overview Header (Persistent) */}
             <div className="bg-[#252525] border-b border-[#333] p-6">
-                {!details && loading ? (
+                {isAuthError && (
+                    <div className="mb-4 p-4 bg-yellow-900/20 border border-yellow-900/50 rounded-lg flex items-center gap-3 text-yellow-400">
+                        <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                        <div>
+                            <p className="font-semibold text-sm">AWS Connection Lost</p>
+                            <p className="text-xs opacity-80">ECS vitals and infrastructure data cannot be updated until credentials are refreshed.</p>
+                        </div>
+                    </div>
+                )}
+
+                {!details && loading && !isAuthError ? (
                     <div className="flex items-center justify-center p-8 text-gray-500 italic">
                         Loading vitals...
                     </div>
@@ -183,6 +210,7 @@ export default function AppDetailView({ appName, initialStream, environment, onB
                 <div className="flex">
                     {[
                         { id: 'logs', label: 'Logs', icon: FileText },
+                        { id: 'infra', label: 'Infrastructure', icon: Layers },
                         { id: 'events', label: 'ECS Events', icon: Activity },
                         { id: 'config', label: 'Config', icon: Settings },
                     ].map(tab => (
@@ -213,6 +241,128 @@ export default function AppDetailView({ appName, initialStream, environment, onB
                         environment={environment}
                         minimal={true}
                     />
+                )}
+
+                {activeTab === 'infra' && (
+                    <div className="p-8 overflow-auto h-full bg-[#1a1a1a]">
+                        {details && (
+                            <div className="max-w-5xl mx-auto space-y-8">
+                                <h2 className="text-2xl font-bold text-white mb-6">Infrastructure & Deployments</h2>
+
+                                {/* ARNs Section */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="bg-[#2d2d2d] p-5 rounded-xl border border-[#404040]">
+                                        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Core Resources</h3>
+                                        <div className="space-y-4">
+                                            <div>
+                                                <label className="text-xs text-gray-500 block mb-1">Cluster ARN</label>
+                                                <div className="font-mono text-[11px] text-gray-300 bg-[#1a1a1a] p-2 rounded break-all border border-[#333]">
+                                                    {details.overview.clusterArn}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-500 block mb-1">Service ARN</label>
+                                                <div className="font-mono text-[11px] text-gray-300 bg-[#1a1a1a] p-2 rounded break-all border border-[#333]">
+                                                    {details.overview.serviceArn}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-500 block mb-1">Active Task Definition</label>
+                                                <div className="font-mono text-[11px] text-blue-400 bg-[#1a1a1a] p-2 rounded break-all border border-[#333]">
+                                                    {details.configuration.taskDefinitionArn}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-[#2d2d2d] p-5 rounded-xl border border-[#404040]">
+                                        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Runtime State</h3>
+                                        <div className="space-y-4">
+                                            <div className="flex justify-between items-center pb-2 border-b border-[#333]">
+                                                <span className="text-sm text-gray-400">Desired Tasks</span>
+                                                <span className="text-xl font-bold text-white">{details.overview.desiredCount}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center pb-2 border-b border-[#333]">
+                                                <span className="text-sm text-gray-400">Running Tasks</span>
+                                                <span className="text-xl font-bold text-green-400">{details.overview.runningCount}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-sm text-gray-400">Pending Tasks</span>
+                                                <span className="text-xl font-bold text-yellow-400">{details.deployments[0]?.pendingCount || 0}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Deployment Rollout */}
+                                <div className="bg-[#2d2d2d] rounded-xl border border-[#404040] overflow-hidden">
+                                    <div className="p-4 bg-[#333] border-b border-[#404040] flex justify-between items-center">
+                                        <h3 className="font-semibold text-white">Active Deployments</h3>
+                                        <Shield className="w-4 h-4 text-blue-400" />
+                                    </div>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left border-collapse">
+                                            <thead>
+                                                <tr className="bg-[#252525] text-xs uppercase text-gray-500 font-semibold">
+                                                    <th className="px-4 py-3 border-b border-[#404040]">Status</th>
+                                                    <th className="px-4 py-3 border-b border-[#404040]">Task Definition</th>
+                                                    <th className="px-4 py-3 border-b border-[#404040]">Tasks (R/D)</th>
+                                                    <th className="px-4 py-3 border-b border-[#404040]">Rollout</th>
+                                                    <th className="px-4 py-3 border-b border-[#404040]">Started</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-[#404040]">
+                                                {details.deployments.map(dep => (
+                                                    <tr key={dep.id} className="hover:bg-[#353535] transition-colors text-sm">
+                                                        <td className="px-4 py-4">
+                                                            <span className={cn(
+                                                                "px-2 py-1 rounded text-[10px] font-bold uppercase",
+                                                                dep.status === 'PRIMARY' ? "bg-blue-500/20 text-blue-400 border border-blue-500/40" : "bg-gray-500/20 text-gray-400 border border-gray-500/40"
+                                                            )}>
+                                                                {dep.status}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-4 font-mono text-xs text-gray-300">
+                                                            {dep.taskDefinition.split('/').pop()}
+                                                        </td>
+                                                        <td className="px-4 py-4">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-bold text-white">{dep.runningCount}</span>
+                                                                <span className="text-gray-500 text-xs">/ {dep.desiredCount}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-4 py-4">
+                                                            {dep.rolloutState ? (
+                                                                <div className="flex flex-col gap-1">
+                                                                    <span className={cn(
+                                                                        "text-[10px] font-bold",
+                                                                        dep.rolloutState === 'COMPLETED' ? "text-green-400" :
+                                                                            dep.rolloutState === 'FAILED' ? "text-red-400" : "text-blue-400"
+                                                                    )}>
+                                                                        {dep.rolloutState}
+                                                                    </span>
+                                                                    {dep.rolloutStateReason && (
+                                                                        <span className="text-[10px] text-gray-500 leading-tight max-w-[150px] truncate" title={dep.rolloutStateReason}>
+                                                                            {dep.rolloutStateReason}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            ) : (
+                                                                <span className="text-gray-500 text-xs">-</span>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-4 py-4 text-xs text-gray-500">
+                                                            {new Date(dep.createdAt).toLocaleString()}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 )}
 
                 {activeTab === 'events' && (

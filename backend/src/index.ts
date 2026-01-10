@@ -17,6 +17,23 @@ app.get('/health', (req, res) => {
 });
 
 /**
+ * GET /api/auth/aws/status
+ * Check if AWS credentials are valid
+ */
+app.get('/api/auth/aws/status', async (req, res) => {
+  const isValid = await cloudwatch.checkAuth();
+  if (isValid) {
+    res.json({ authenticated: true });
+  } else {
+    res.status(401).json({
+      authenticated: false,
+      error: 'AWS credentials expired',
+      requiresAuth: true
+    });
+  }
+});
+
+/**
  * GET /api/apps?env=qa|dev
  * Get list of available apps
  */
