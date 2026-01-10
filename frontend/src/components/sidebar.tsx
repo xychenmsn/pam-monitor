@@ -27,8 +27,8 @@ export default function Sidebar({
     >
       <ScrollArea className="flex-1">
         <div className="space-y-1 p-2">
-          <div className="mb-2 px-2 py-1 text-xs font-semibold uppercase text-muted-foreground">
-            {!collapsed ? 'Logs' : ''}
+          <div className="mb-2 px-2 py-1 text-xs font-semibold uppercase text-muted-foreground tracking-wider">
+            {!collapsed ? 'Apps' : ''}
           </div>
 
           {loading ? (
