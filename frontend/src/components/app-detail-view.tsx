@@ -149,10 +149,10 @@ export default function AppDetailView({ appName, initialStream, environment, onB
                                 </h3>
                                 <button
                                     onClick={() => setShowRestartConfirm(true)}
-                                    disabled={restarting || restartSuccess}
+                                    disabled={restarting || restartSuccess || details.deployments[0]?.rolloutState === 'IN_PROGRESS'}
                                     className={cn(
-                                        "flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-all",
-                                        restartSuccess
+                                        "flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-all text-nowrap",
+                                        restartSuccess || details.deployments[0]?.rolloutState === 'IN_PROGRESS'
                                             ? "bg-green-500/20 text-green-400 border border-green-500/50"
                                             : "bg-[#333] hover:bg-[#444] text-gray-300 border border-[#404040]"
                                     )}
@@ -161,10 +161,18 @@ export default function AppDetailView({ appName, initialStream, environment, onB
                                         <div className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
                                     ) : restartSuccess ? (
                                         <CheckCircle className="w-3 h-3" />
+                                    ) : details.deployments[0]?.rolloutState === 'IN_PROGRESS' ? (
+                                        <div className="w-3 h-3 border-2 border-green-500/30 border-t-green-500 rounded-full animate-spin" />
                                     ) : (
                                         <RotateCcw className="w-3 h-3" />
                                     )}
-                                    {restartSuccess ? 'Restart Triggered' : restarting ? 'Restarting...' : 'Restart'}
+                                    {restarting
+                                        ? 'Restarting...'
+                                        : restartSuccess
+                                            ? 'Restart Triggered'
+                                            : details.deployments[0]?.rolloutState === 'IN_PROGRESS'
+                                                ? 'Deploying...'
+                                                : 'Restart'}
                                 </button>
                             </div>
                             <div className="flex items-center gap-3">
