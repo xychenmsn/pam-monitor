@@ -5,6 +5,7 @@ import { getDashboardStatus } from './services/dashboard.js';
 import { getAppDetails, restartService } from './services/details.js';
 import { getAppSecrets } from './services/secrets.js';
 import { getSchedulerRule, updateSchedulerRule, triggerScheduledTask, enableSchedulerRule, disableSchedulerRule } from './services/scheduler.js';
+import { listPsiPayloads, getPsiPayloadContent } from './services/s3.js';
 
 const app = express();
 const port = process.env.PORT || 31191;
@@ -137,6 +138,64 @@ app.get('/api/apps/:appName/secrets', async (req, res) => {
       error: isAuthError ? 'AWS credentials expired' : 'Failed to fetch secrets',
       message: err.message || 'Unknown error',
       requiresAuth: isAuthError,
+    });
+  }
+});
+
+/**
+ * GET /api/apps/:appName/s3/payloads?env=qa
+ * Fetch PSI payloads from S3
+ */
+app.get('/api/apps/:appName/s3/payloads', async (req, res) => {
+  const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+  const appName = req.params.appName;
+
+  if (!appName.toLowerCase().includes('psi')) {
+    return res.status(400).json({ error: 'Payload viewer is only available for PSI apps' });
+  }
+
+  try {
+    const result = await listPsiPayloads(env);
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error fetching PSI payloads:', err);
+    const isAuthError =
+      err.name === 'ExpiredTokenException' ||
+      err.name === 'UnauthorizedException' ||
+      (err.message || '').includes('security token') ||
+      (err.message || '').includes('expired');
+    res.status(isAuthError ? 401 : 500).json({
+      error: isAuthError ? 'AWS credentials expired' : 'Failed to fetch payloads',
+      message: err.message || 'Unknown error',
+      requiresAuth: isAuthError,
+    });
+  }
+});
+
+/**
+ * GET /api/apps/:appName/s3/payload-content?env=qa&key=...
+ * Fetch specific PSI payload content from S3
+ */
+app.get('/api/apps/:appName/s3/payload-content', async (req, res) => {
+  const key = req.query.key as string;
+  const appName = req.params.appName;
+
+  if (!appName.toLowerCase().includes('psi')) {
+    return res.status(400).json({ error: 'Payload viewer is only available for PSI apps' });
+  }
+
+  if (!key) {
+    return res.status(400).json({ error: 'S3 key is required' });
+  }
+
+  try {
+    const content = await getPsiPayloadContent(key);
+    res.send(content);
+  } catch (err: any) {
+    console.error('Error fetching PSI payload content:', err);
+    res.status(500).json({
+      error: 'Failed to fetch payload content',
+      message: err.message || 'Unknown error',
     });
   }
 });

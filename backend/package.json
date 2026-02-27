@@ -9,10 +9,11 @@
   },
   "dependencies": {
     "@aws-sdk/client-cloudwatch-events": "^3.999.0",
-    "@aws-sdk/client-cloudwatch-logs": "^3.709.0",
-    "@aws-sdk/client-ecs": "^3.966.0",
-    "@aws-sdk/client-secrets-manager": "^3.997.0",
-    "@aws-sdk/credential-providers": "^3.966.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.999.0",
+    "@aws-sdk/client-ecs": "^3.999.0",
+    "@aws-sdk/client-s3": "^3.999.0",
+    "@aws-sdk/client-secrets-manager": "^3.999.0",
+    "@aws-sdk/credential-providers": "^3.999.0",
     "cors": "^2.8.5",
     "express": "^4.21.2"
   },

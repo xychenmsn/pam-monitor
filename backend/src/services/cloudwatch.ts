@@ -231,18 +231,17 @@ export async function getStreamList(env: 'qa' | 'dev', appName: string): Promise
     for (let i = 0; i < 5; i++) {
       const command = new DescribeLogStreamsCommand({
         logGroupName,
-        // No prefix, so we can sort by time
         orderBy: 'LastEventTime',
         descending: true,
         limit: 50,
         nextToken,
       });
 
-      const response = await client.send(command);
+      const response: any = await client.send(command as any);
       const streams = response.logStreams || [];
 
       // Find the first stream that matches our app
-      const match = streams.find(s => s.logStreamName && s.logStreamName.startsWith(logStreamPrefix));
+      const match = streams.find((s: any) => s.logStreamName && s.logStreamName.startsWith(logStreamPrefix));
 
       if (match && match.logStreamName) {
         return [match.logStreamName];
@@ -283,7 +282,7 @@ export async function fetchLogsFromStream(
           nextToken,
         });
 
-        const response = await client.send(command);
+        const response: any = await client.send(command as any);
 
         for (const event of response.events || []) {
           if (event.timestamp && event.message) {
@@ -499,7 +498,7 @@ export async function startLiveTail(
             if (event.sessionUpdate) {
               const logs = event.sessionUpdate.sessionResults || [];
               onEvent(logs);
-            } else if (event.sessionTimeout) {
+            } else if ((event as any).sessionTimeout) {
               onError(new Error('Live tail session timed out'));
             }
           }

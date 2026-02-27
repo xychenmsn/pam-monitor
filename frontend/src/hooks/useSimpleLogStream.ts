@@ -52,27 +52,7 @@ export function useSimpleLogStream() {
         stateRef.current = state
     }, [state])
 
-    // Helper to add API call to debug log - uses ref to avoid dependency issues
-    const logApiCall = useCallback((call: Omit<ApiCall, 'id'>): string => {
-        apiCallIdRef.current += 1
-        const id = `${Date.now()}-${apiCallIdRef.current}`
-        const newCall = { ...call, id }
-        setState(prev => ({
-            ...prev,
-            apiCalls: [...prev.apiCalls.slice(-50), newCall]
-        }))
-        return id
-    }, [])
 
-    // Helper to update API call status
-    const updateApiCall = useCallback((id: string, updates: Partial<ApiCall>) => {
-        setState(prev => ({
-            ...prev,
-            apiCalls: prev.apiCalls.map(call =>
-                call.id === id ? { ...call, ...updates } : call
-            )
-        }))
-    }, [])
 
     // Fetch with API logging - made stable with empty deps and using refs
     const fetchWithLog = useCallback(async <T>(

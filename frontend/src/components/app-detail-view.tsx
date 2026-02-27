@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Activity, Box, Settings, FileText, CheckCircle, Clock, RotateCcw, Shield, Layers, AlertCircle, KeyRound, Eye, EyeOff, Copy, Check, Calendar, Play, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Activity, Box, Settings, FileText, CheckCircle, Clock, RotateCcw, Shield, Layers, AlertCircle, KeyRound, Eye, EyeOff, Copy, Check, Calendar, Play, RefreshCw, FileJson } from 'lucide-react';
 import LogViewer from './log-viewer';
 import ConfirmationModal from './confirmation-modal';
+import PsiPayloadViewer from './psi-payload-viewer';
 import { cn } from '@/lib/utils';
 
 interface AppDetailViewProps {
@@ -85,7 +86,7 @@ interface SchedulerRuleInfo {
 export default function AppDetailView({ appName, initialStream, environment, activeTab: activeTabProp, onBack, isAuthError }: AppDetailViewProps) {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
-    const validTabs = ['logs', 'infra', 'events', 'config', 'secrets', 'scheduler'] as const;
+    const validTabs = ['logs', 'infra', 'events', 'config', 'secrets', 'scheduler', 'payloads'] as const;
     type TabId = typeof validTabs[number];
     const activeTab: TabId = validTabs.includes(activeTabProp as TabId) ? (activeTabProp as TabId) : 'logs';
 
@@ -407,6 +408,9 @@ export default function AppDetailView({ appName, initialStream, environment, act
                         ...(details?.overview.status === 'SCHEDULED' || details?.overview.status === 'STOPPED'
                             ? [{ id: 'scheduler', label: 'Scheduler', icon: Calendar }]
                             : []),
+                        ...(appName.toLowerCase().includes('psi')
+                            ? [{ id: 'payloads', label: 'Payload Logs', icon: FileJson }]
+                            : []),
                     ].map(tab => (
                         <button
                             key={tab.id}
@@ -434,6 +438,13 @@ export default function AppDetailView({ appName, initialStream, environment, act
                         initialStream={initialStream}
                         environment={environment}
                         minimal={true}
+                    />
+                )}
+
+                {activeTab === 'payloads' && (
+                    <PsiPayloadViewer
+                        appName={appName}
+                        environment={environment}
                     />
                 )}
 
