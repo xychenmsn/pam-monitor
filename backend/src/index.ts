@@ -4,7 +4,7 @@ import * as cloudwatch from './services/cloudwatch.js';
 import { getDashboardStatus } from './services/dashboard.js';
 import { getAppDetails, restartService } from './services/details.js';
 import { getAppSecrets } from './services/secrets.js';
-import { getSchedulerRule, updateSchedulerRule, triggerScheduledTask } from './services/scheduler.js';
+import { getSchedulerRule, updateSchedulerRule, triggerScheduledTask, enableSchedulerRule, disableSchedulerRule } from './services/scheduler.js';
 
 const app = express();
 const port = process.env.PORT || 31191;
@@ -191,6 +191,36 @@ app.put('/api/scheduler/:ruleName', async (req, res) => {
   } catch (err: any) {
     console.error('Error updating scheduler rule:', err);
     res.status(500).json({ error: err.message || 'Failed to update scheduler rule' });
+  }
+});
+
+/**
+ * POST /api/scheduler/:ruleName/enable?env=qa
+ * Enable a CloudWatch Events rule (resume scheduled runs)
+ */
+app.post('/api/scheduler/:ruleName/enable', async (req, res) => {
+  const { ruleName } = req.params;
+  try {
+    await enableSchedulerRule(ruleName);
+    res.json({ success: true, state: 'ENABLED' });
+  } catch (err: any) {
+    console.error('Error enabling scheduler rule:', err);
+    res.status(500).json({ error: err.message || 'Failed to enable rule' });
+  }
+});
+
+/**
+ * POST /api/scheduler/:ruleName/disable?env=qa
+ * Disable a CloudWatch Events rule (pause scheduled runs)
+ */
+app.post('/api/scheduler/:ruleName/disable', async (req, res) => {
+  const { ruleName } = req.params;
+  try {
+    await disableSchedulerRule(ruleName);
+    res.json({ success: true, state: 'DISABLED' });
+  } catch (err: any) {
+    console.error('Error disabling scheduler rule:', err);
+    res.status(500).json({ error: err.message || 'Failed to disable rule' });
   }
 });
 

@@ -3,6 +3,8 @@ import {
     DescribeRuleCommand,
     ListTargetsByRuleCommand,
     PutRuleCommand,
+    EnableRuleCommand,
+    DisableRuleCommand,
 } from '@aws-sdk/client-cloudwatch-events';
 import { ECSClient, RunTaskCommand, ListTasksCommand, DescribeTasksCommand } from '@aws-sdk/client-ecs';
 import { withAutoRetry, getECSClient } from './cloudwatch.js';
@@ -70,6 +72,22 @@ export async function getSchedulerRule(ruleName: string, _env: string): Promise<
         description: ruleRes.Description,
         targets,
     };
+}
+
+/**
+ * Enable a CloudWatch Events rule (resume scheduled runs)
+ */
+export async function enableSchedulerRule(ruleName: string): Promise<void> {
+    const cw = await getCWClient();
+    await cw.send(new EnableRuleCommand({ Name: ruleName }));
+}
+
+/**
+ * Disable a CloudWatch Events rule (pause scheduled runs)
+ */
+export async function disableSchedulerRule(ruleName: string): Promise<void> {
+    const cw = await getCWClient();
+    await cw.send(new DisableRuleCommand({ Name: ruleName }));
 }
 
 /**

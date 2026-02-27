@@ -800,14 +800,42 @@ export default function AppDetailView({ appName, initialStream, environment, onB
                                             </div>
                                             <div className="flex items-center justify-between">
                                                 <span className="text-sm text-gray-400">State</span>
-                                                <span className={cn(
-                                                    "text-xs font-bold px-2 py-1 rounded uppercase",
-                                                    schedulerRule.state === 'ENABLED'
-                                                        ? "bg-green-500/20 text-green-400 border border-green-500/40"
-                                                        : "bg-red-500/20 text-red-400 border border-red-500/40"
-                                                )}>
-                                                    {schedulerRule.state}
-                                                </span>
+                                                <div className="flex items-center gap-3">
+                                                    <span className={cn(
+                                                        "text-xs font-bold px-2 py-1 rounded uppercase",
+                                                        schedulerRule.state === 'ENABLED'
+                                                            ? "bg-green-500/20 text-green-400 border border-green-500/40"
+                                                            : "bg-red-500/20 text-red-400 border border-red-500/40"
+                                                    )}>
+                                                        {schedulerRule.state}
+                                                    </span>
+                                                    <button
+                                                        onClick={async () => {
+                                                            const isEnabled = schedulerRule.state === 'ENABLED';
+                                                            const action = isEnabled ? 'disable' : 'enable';
+                                                            try {
+                                                                const res = await fetch(
+                                                                    `http://localhost:31191/api/scheduler/${schedulerRule.name}/${action}`,
+                                                                    { method: 'POST' }
+                                                                );
+                                                                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                                                                // Optimistically update state, then refresh
+                                                                setSchedulerRule(prev => prev ? { ...prev, state: isEnabled ? 'DISABLED' : 'ENABLED' } : prev);
+                                                                setTimeout(() => loadScheduler(schedulerRule.name), 1000);
+                                                            } catch (e: any) {
+                                                                setSchedulerError(e.message || `Failed to ${action} rule`);
+                                                            }
+                                                        }}
+                                                        className={cn(
+                                                            "text-xs font-semibold px-3 py-1 rounded transition-all border",
+                                                            schedulerRule.state === 'ENABLED'
+                                                                ? "bg-red-900/20 hover:bg-red-900/40 text-red-400 border-red-700/40"
+                                                                : "bg-green-900/20 hover:bg-green-900/40 text-green-400 border-green-700/40"
+                                                        )}
+                                                    >
+                                                        {schedulerRule.state === 'ENABLED' ? 'Disable' : 'Enable'}
+                                                    </button>
+                                                </div>
                                             </div>
                                             <div className="flex items-center justify-between">
                                                 <span className="text-sm text-gray-400">Task Count</span>
