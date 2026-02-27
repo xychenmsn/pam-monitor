@@ -325,7 +325,7 @@ export default function AppDetailView({ appName, initialStream, environment, act
                                     <Activity className="w-4 h-4" /> Service Status
                                 </h3>
                                 {/* Hide Restart for scheduled tasks */}
-                                {details.overview.status !== 'SCHEDULED' && details.overview.status !== 'STOPPED' && (
+                                {details.overview.status !== 'STOPPED' && (
                                     <button
                                         onClick={() => setShowRestartConfirm(true)}
                                         disabled={restarting || restartSuccess || details.deployments[0]?.rolloutState === 'IN_PROGRESS'}
@@ -873,18 +873,25 @@ export default function AppDetailView({ appName, initialStream, environment, act
                                         </div>
                                         <div className="p-5">
                                             <p className="text-xs text-gray-500 mb-3">
-                                                Use <span className="font-mono bg-[#1a1a1a] px-1 rounded">rate(N minutes)</span>,{' '}
-                                                <span className="font-mono bg-[#1a1a1a] px-1 rounded">rate(N hours)</span>, or{' '}
-                                                <span className="font-mono bg-[#1a1a1a] px-1 rounded">cron(0 * * * ? *)</span>
+                                                Select a frequency for the {appName} scheduled task.
                                             </p>
                                             <div className="flex gap-3">
-                                                <input
-                                                    type="text"
+                                                <select
                                                     value={editSchedule}
                                                     onChange={(e) => setEditSchedule(e.target.value)}
-                                                    className="flex-1 bg-[#1a1a1a] border border-[#404040] rounded-lg px-4 py-2.5 font-mono text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
-                                                    placeholder="e.g. rate(10 minutes)"
-                                                />
+                                                    className="flex-1 bg-[#1a1a1a] border border-[#404040] rounded-lg px-4 py-2.5 font-mono text-sm text-white focus:outline-none focus:border-blue-500 transition-colors appearance-none"
+                                                >
+                                                    <option value="rate(5 minutes)">Every 5 minutes</option>
+                                                    <option value="rate(10 minutes)">Every 10 minutes</option>
+                                                    <option value="rate(30 minutes)">Every 30 minutes</option>
+                                                    <option value="rate(1 hour)">Every hour</option>
+                                                    <option value="rate(8 hours)">Every 8 hours</option>
+                                                    <option value="rate(1 day)">Every 24 hours</option>
+                                                    <option value="rate(7 days)">Every 1 week</option>
+                                                    {!['rate(5 minutes)', 'rate(10 minutes)', 'rate(30 minutes)', 'rate(1 hour)', 'rate(8 hours)', 'rate(1 day)', 'rate(7 days)'].includes(editSchedule) && (
+                                                        <option value={editSchedule}>{editSchedule} (Custom)</option>
+                                                    )}
+                                                </select>
                                                 <button
                                                     onClick={handleSaveSchedule}
                                                     disabled={savingSchedule || editSchedule === schedulerRule.scheduleExpression}

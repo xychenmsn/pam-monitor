@@ -1,5 +1,6 @@
-import { DescribeServicesCommand, ListTasksCommand, DescribeTasksCommand, DescribeTaskDefinitionCommand, UpdateServiceCommand } from '@aws-sdk/client-ecs';
+import { DescribeServicesCommand, ListTasksCommand, DescribeTasksCommand, DescribeTaskDefinitionCommand, UpdateServiceCommand, StopTaskCommand } from '@aws-sdk/client-ecs';
 import { getECSClient, invalidateClients } from './cloudwatch.js';
+import { triggerScheduledTask } from './scheduler.js';
 import { withAwsRecovery } from './auth.js';
 import fs from 'fs';
 import path from 'path';
@@ -226,7 +227,38 @@ export async function restartService(appName: string, env: 'qa' | 'dev'): Promis
     }
 
     if (appConfig.isScheduledTask) {
-        throw new Error(`${appName} is a scheduled task and does not support restart. Use the trigger (Run Now) endpoint instead.`);
+        return await withAwsRecovery(
+            async (forceRefetch) => {
+                const ecs = await getECSClient(forceRefetch);
+
+                // 1. Find all running tasks for this family
+                const listCmd = new ListTasksCommand({
+                    cluster: appConfig.cluster,
+                    family: appConfig.taskFamily,
+                    desiredStatus: 'RUNNING'
+                });
+                const listRes = await ecs.send(listCmd);
+                const runningTaskArns = listRes.taskArns || [];
+
+                // 2. Stop them
+                for (const taskArn of runningTaskArns) {
+                    try {
+                        await ecs.send(new StopTaskCommand({
+                            cluster: appConfig.cluster,
+                            task: taskArn,
+                            reason: 'Manual restart triggered via dashboard'
+                        }));
+                    } catch (e) {
+                        console.warn(`Failed to stop task ${taskArn}:`, e);
+                    }
+                }
+
+                // 3. Trigger a fresh run
+                const triggerRes = await triggerScheduledTask(appName, env);
+                return triggerRes.success;
+            },
+            () => invalidateClients()
+        );
     }
 
     return await withAwsRecovery(
