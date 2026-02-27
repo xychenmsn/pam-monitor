@@ -4,6 +4,7 @@ import * as cloudwatch from './services/cloudwatch.js';
 import { getDashboardStatus } from './services/dashboard.js';
 import { getAppDetails, restartService } from './services/details.js';
 import { getAppSecrets } from './services/secrets.js';
+import { triggerAwsLogin } from './services/auth.js';
 import { getSchedulerRule, updateSchedulerRule, triggerScheduledTask, enableSchedulerRule, disableSchedulerRule } from './services/scheduler.js';
 import { listPsiPayloads, getPsiPayloadContent } from './services/s3.js';
 
@@ -52,6 +53,20 @@ app.get('/api/auth/aws/status', async (req, res) => {
       requiresAuth: true,
       sessionId: SESSION_ID
     });
+  }
+});
+
+/**
+ * POST /api/auth/aws/login
+ * Trigger the local AWS login script/alias
+ */
+app.post('/api/auth/aws/login', async (req, res) => {
+  try {
+    const success = await triggerAwsLogin();
+    res.json({ success });
+  } catch (error: any) {
+    console.error('Error triggering AWS login:', error);
+    res.status(500).json({ error: 'Failed to trigger AWS login', message: error.message });
   }
 });
 

@@ -1,6 +1,10 @@
 import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import fs from 'fs';
 import path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 /**
  * Checks if an error is a retryable AWS authentication/credential error
@@ -103,5 +107,35 @@ export async function withAwsRecovery<T>(
             }
         }
         throw error;
+    }
+}
+
+/**
+ * Triggers the local AWS login script/alias
+ */
+export async function triggerAwsLogin(): Promise<boolean> {
+    console.log('[AUTH] Triggering AWS login via shell command "awslogin"...');
+    try {
+        // Use an interactive login shell to ensure aliases are loaded.
+        // On Mac this is typically zsh.
+        const shell = process.env.SHELL || '/bin/zsh';
+
+        // We don't want to wait forever if it's truly blocking without a timeout,
+        // but the user says it waits for MFA on the phone.
+        // We'll give it a generous timeout of 60 seconds.
+        const { stdout, stderr } = await execAsync(`${shell} -i -c "awslogin"`, {
+            env: { ...process.env, TERM: 'xterm' },
+            timeout: 60000
+        });
+
+        if (stdout) console.log('[AUTH] awslogin stdout:', stdout);
+        if (stderr) console.warn('[AUTH] awslogin stderr:', stderr);
+
+        return true;
+    } catch (e: any) {
+        // Non-zero exit code might just mean it was already logged in or 
+        // MFA timed out, but we should log it.
+        console.warn(`[AUTH] awslogin execution finished with notice: ${e.message}`);
+        return true; // Return true anyway as it might have succeeded in refreshing
     }
 }

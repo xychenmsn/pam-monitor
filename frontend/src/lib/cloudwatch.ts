@@ -118,3 +118,17 @@ export async function checkAuth(): Promise<boolean> {
     return false;
   }
 }
+/**
+ * Trigger the local AWS login script via backend
+ */
+export async function triggerLogin(): Promise<boolean> {
+  try {
+    const response = await fetch(`${API_BASE}/api/auth/aws/login`, { method: 'POST' });
+    if (!response.ok) return false;
+    const data = await response.json();
+    return data.success;
+  } catch (error) {
+    console.error('Failed to trigger login:', error);
+    return false;
+  }
+}

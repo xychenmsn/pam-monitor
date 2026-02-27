@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { AlertCircle, Terminal, Loader2, RefreshCw } from 'lucide-react'
 import { Button } from './ui/button'
+import { triggerLogin } from '../lib/cloudwatch'
 
 interface RobustAuthDialogProps {
     isOpen: boolean
@@ -82,10 +83,18 @@ export default function RobustAuthDialog({ isOpen, onRetry }: RobustAuthDialogPr
         setIsRetrying(true)
         setLastError(null)
         try {
+            // 1. Trigger the login script (MFA)
+            await triggerLogin()
+
+            // Give user a moment to see the push notification/confirm
+            // The process might return before they click.
+            await new Promise(resolve => setTimeout(resolve, 2000))
+
+            // 2. Check if it worked
             const success = await onRetry()
             if (!success) {
                 setRetryCount(prev => prev + 1)
-                setLastError('Credentials still expired')
+                setLastError('Credentials still expired. Ensure you confirmed the push notification on your phone, then try again.')
             }
         } catch (error) {
             setRetryCount(prev => prev + 1)
