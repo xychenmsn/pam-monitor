@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Activity, Box, Settings, FileText, CheckCircle, Clock, RotateCcw, Shield, Layers, AlertCircle, KeyRound, Eye, EyeOff, Copy, Check, Calendar, Play, RefreshCw } from 'lucide-react';
 import LogViewer from './log-viewer';
 import ConfirmationModal from './confirmation-modal';
@@ -8,6 +9,7 @@ interface AppDetailViewProps {
     appName: string;
     initialStream?: string;
     environment: 'qa' | 'dev';
+    activeTab?: string;
     onBack: () => void;
     isAuthError?: boolean;
 }
@@ -80,8 +82,17 @@ interface SchedulerRuleInfo {
     }[];
 }
 
-export default function AppDetailView({ appName, initialStream, environment, onBack, isAuthError }: AppDetailViewProps) {
-    const [activeTab, setActiveTab] = useState<'logs' | 'infra' | 'events' | 'config' | 'secrets' | 'scheduler'>('logs');
+export default function AppDetailView({ appName, initialStream, environment, activeTab: activeTabProp, onBack, isAuthError }: AppDetailViewProps) {
+    const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const validTabs = ['logs', 'infra', 'events', 'config', 'secrets', 'scheduler'] as const;
+    type TabId = typeof validTabs[number];
+    const activeTab: TabId = validTabs.includes(activeTabProp as TabId) ? (activeTabProp as TabId) : 'logs';
+
+    const navigateToTab = (tab: TabId) => {
+        const params = new URLSearchParams(searchParams);
+        navigate(`/app/${appName}/${tab}?${params.toString()}`);
+    };
     const [details, setDetails] = useState<AppDetails | null>(null);
     const [loading, setLoading] = useState(false);
     const [restarting, setRestarting] = useState(false);
@@ -399,7 +410,7 @@ export default function AppDetailView({ appName, initialStream, environment, onB
                     ].map(tab => (
                         <button
                             key={tab.id}
-                            onClick={() => setActiveTab(tab.id as any)}
+                            onClick={() => navigateToTab(tab.id as any)}
                             className={cn(
                                 "flex items-center gap-2 px-6 py-4 relative font-medium text-sm transition-all",
                                 activeTab === tab.id
