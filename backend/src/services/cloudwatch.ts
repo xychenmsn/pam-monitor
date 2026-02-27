@@ -23,6 +23,7 @@ export const APP_DISPLAY_NAMES: Record<string, string> = {
   'rmxqa-worker': 'RMX Worker',
   gatewayadminqa: 'Gateway Admin',
   psiqa: 'PSI',
+  psi: 'PSI',
 };
 
 export const APP_PREFIXES = [

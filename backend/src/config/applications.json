@@ -39,6 +39,17 @@
             "logStreamPrefix": "ecs/pamadminqa",
             "cluster": "ecs-custom-apps-pam-qa",
             "service": "pamadminqa-service"
+        },
+        {
+            "id": "psi",
+            "name": "PSI",
+            "logGroup": "custom-apps-pam-cloudwatch-qa",
+            "logStreamPrefix": "ecs/psiqa",
+            "cluster": "ecs-custom-apps-pam-qa",
+            "service": "psiqa",
+            "isScheduledTask": true,
+            "taskFamily": "psiqa-task-family",
+            "schedulerRule": "psiqa-task-scheduler"
         }
     ],
     "dev": [

@@ -3,6 +3,8 @@ import cors from 'cors';
 import * as cloudwatch from './services/cloudwatch.js';
 import { getDashboardStatus } from './services/dashboard.js';
 import { getAppDetails, restartService } from './services/details.js';
+import { getAppSecrets } from './services/secrets.js';
+import { getSchedulerRule, updateSchedulerRule, triggerScheduledTask } from './services/scheduler.js';
 
 const app = express();
 const port = process.env.PORT || 31191;
@@ -114,6 +116,31 @@ app.get('/api/apps/:appName/details', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/apps/:appName/secrets?env=qa
+ * Fetch secrets from AWS Secrets Manager for the given app
+ */
+app.get('/api/apps/:appName/secrets', async (req, res) => {
+  const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+  const appName = req.params.appName;
+  try {
+    const result = await getAppSecrets(appName, env);
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error fetching secrets:', err);
+    const isAuthError =
+      err.name === 'ExpiredTokenException' ||
+      err.name === 'UnauthorizedException' ||
+      (err.message || '').includes('security token') ||
+      (err.message || '').includes('expired');
+    res.status(isAuthError ? 401 : 500).json({
+      error: isAuthError ? 'AWS credentials expired' : 'Failed to fetch secrets',
+      message: err.message || 'Unknown error',
+      requiresAuth: isAuthError,
+    });
+  }
+});
+
 app.post('/api/apps/:appName/restart', async (req, res) => {
   const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
   const appName = req.params.appName;
@@ -129,6 +156,64 @@ app.post('/api/apps/:appName/restart', async (req, res) => {
     res.status(500).json({ error: err.message || 'Failed to restart' });
   }
 });
+
+/**
+ * GET /api/scheduler/:ruleName?env=qa
+ * Get CloudWatch Events rule info and targets for a scheduled task
+ */
+app.get('/api/scheduler/:ruleName', async (req, res) => {
+  const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+  const { ruleName } = req.params;
+  try {
+    const rule = await getSchedulerRule(ruleName, env);
+    res.json(rule);
+  } catch (err: any) {
+    console.error('Error fetching scheduler rule:', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch scheduler rule' });
+  }
+});
+
+/**
+ * PUT /api/scheduler/:ruleName?env=qa
+ * Update the schedule expression for a CloudWatch Events rule
+ * Body: { scheduleExpression: string }
+ */
+app.put('/api/scheduler/:ruleName', async (req, res) => {
+  const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+  const { ruleName } = req.params;
+  const { scheduleExpression } = req.body;
+  if (!scheduleExpression || typeof scheduleExpression !== 'string') {
+    return res.status(400).json({ error: 'scheduleExpression is required' });
+  }
+  try {
+    const result = await updateSchedulerRule(ruleName, scheduleExpression, env);
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error updating scheduler rule:', err);
+    res.status(500).json({ error: err.message || 'Failed to update scheduler rule' });
+  }
+});
+
+/**
+ * POST /api/apps/:appName/trigger?env=qa
+ * Manually trigger a scheduled task (Run Now), bypassing the schedule
+ */
+app.post('/api/apps/:appName/trigger', async (req, res) => {
+  const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+  const { appName } = req.params;
+  try {
+    const result = await triggerScheduledTask(appName, env);
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
+  } catch (err: any) {
+    console.error('Error triggering scheduled task:', err);
+    res.status(500).json({ error: err.message || 'Failed to trigger task' });
+  }
+});
+
 /**
  * GET /api/streams?app=pamapiqa-worker&env=qa
  * Get list of log streams sorted by recency (most recent first)

@@ -50,7 +50,9 @@ export default function LogViewer({ appName, appDisplayName, environment, initia
   // Scroll to bottom when initial load completes
   useEffect(() => {
     if (!logState.loading && !initialLoadDone && logState.logs.length > 0) {
-      scrollRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+      if (scrollAreaRef.current) {
+        scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight
+      }
       setInitialLoadDone(true)
     }
   }, [logState.loading, initialLoadDone, logState.logs.length])
@@ -58,7 +60,9 @@ export default function LogViewer({ appName, appDisplayName, environment, initia
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
     if (autoScroll && !logState.loading && logState.logs.length > previousLogCount.current && initialLoadDone) {
-      scrollRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      if (scrollAreaRef.current) {
+        scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight
+      }
     }
     previousLogCount.current = logState.logs.length
   }, [logState.logs.length, autoScroll, logState.loading, initialLoadDone])

@@ -65,28 +65,74 @@ export async function getAppDetails(appName: string, env: 'qa' | 'dev'): Promise
 
     return await withAutoRetry(async () => {
         const ecs = await getECSClient();
+        let service: any = null;
+        let tasks: any[] = [];
+        let tdArn: string | undefined;
 
-        // 1. Describe Service
-        const svcCmd = new DescribeServicesCommand({
-            cluster: appConfig.cluster,
-            services: [appConfig.service]
-        });
-        const svcRes = await ecs.send(svcCmd);
-        const service = svcRes.services?.[0];
+        // 1. Describe Service (Skip if Scheduled Task)
+        if (!appConfig.isScheduledTask) {
+            try {
+                const svcCmd = new DescribeServicesCommand({
+                    cluster: appConfig.cluster,
+                    services: [appConfig.service]
+                });
+                const svcRes = await ecs.send(svcCmd);
+                service = svcRes.services?.[0];
+            } catch (err) {
+                console.warn(`Failed to describe service ${appConfig.service}:`, err);
+            }
 
-        if (!service) return null;
+            if (!service) {
+                // Fallback: If service missing but not marked scheduled, maybe it's just down? 
+                // Return null or partial? Current behavior is null.
+                return null;
+            }
+        } else {
+            // Mock Service Object for Scheduled Task
+            service = {
+                status: 'SCHEDULED',
+                displayName: appConfig.name,
+                runningCount: 0,
+                desiredCount: 0,
+                createdAt: new Date(), // TODO: Get from rule?
+                clusterArn: appConfig.cluster,
+                serviceArn: 'N/A',
+                events: [],
+                deployments: []
+            };
+        }
 
         // 2. List Tasks
-        const listTasksCmd = new ListTasksCommand({
+        // For services: List RUNNING. 
+        // For scheduled: List RUNNING first, if empty list STOPPED (recent)
+        let taskArns: string[] = [];
+
+        const listRunningCmd = new ListTasksCommand({
             cluster: appConfig.cluster,
-            serviceName: appConfig.service,
+            serviceName: appConfig.isScheduledTask ? undefined : appConfig.service,
+            family: appConfig.isScheduledTask ? appConfig.taskFamily : undefined,
             desiredStatus: 'RUNNING'
         });
-        const listTasksRes = await ecs.send(listTasksCmd);
-        const taskArns = listTasksRes.taskArns || [];
+        const listRunningRes = await ecs.send(listRunningCmd);
+        taskArns = listRunningRes.taskArns || [];
+
+        // If scheduled and no running tasks, find last stopped task
+        if (appConfig.isScheduledTask && taskArns.length === 0) {
+            const listStoppedCmd = new ListTasksCommand({
+                cluster: appConfig.cluster,
+                family: appConfig.taskFamily,
+                desiredStatus: 'STOPPED',
+                maxResults: 1 // Just get the last one
+            });
+            const listStoppedRes = await ecs.send(listStoppedCmd);
+            taskArns = listStoppedRes.taskArns || [];
+
+            if (taskArns.length > 0) {
+                service.status = 'STOPPED';
+            }
+        }
 
         // 3. Describe Tasks
-        let tasks: any[] = [];
         if (taskArns.length > 0) {
             const descTasksCmd = new DescribeTasksCommand({
                 cluster: appConfig.cluster,
@@ -96,8 +142,14 @@ export async function getAppDetails(appName: string, env: 'qa' | 'dev'): Promise
             tasks = descTasksRes.tasks || [];
         }
 
-        // 4. Describe Task Definition (from Service or Task)
-        const tdArn = tasks[0]?.taskDefinitionArn || service.taskDefinition;
+        // 4. Describe Task Definition
+        tdArn = tasks[0]?.taskDefinitionArn || service.taskDefinition;
+        // If still no TD ARN (e.g. no tasks found for scheduled task), fallback to config
+        if (!tdArn && appConfig.isScheduledTask && appConfig.taskFamily) {
+            // We could fetch the latest active revision, or just leave empty
+            // Let's try to list task definitions? Or just skip.
+        }
+
         let td: any = null;
         if (tdArn) {
             const tdCmd = new DescribeTaskDefinitionCommand({ taskDefinition: tdArn });
@@ -112,7 +164,7 @@ export async function getAppDetails(appName: string, env: 'qa' | 'dev'): Promise
             overview: {
                 status: service.status || 'UNKNOWN',
                 displayName: appConfig.name,
-                runningCount: service.runningCount || 0,
+                runningCount: tasks.filter((t: any) => t.lastStatus === 'RUNNING').length || service.runningCount || 0,
                 desiredCount: service.desiredCount || 0,
                 createdAt: service.createdAt || new Date(),
                 clusterArn: service.clusterArn || '',
@@ -167,6 +219,10 @@ export async function restartService(appName: string, env: 'qa' | 'dev'): Promis
 
     if (!appConfig) {
         throw new Error(`App ${appName} not found in config for ${env}`);
+    }
+
+    if (appConfig.isScheduledTask) {
+        throw new Error(`${appName} is a scheduled task and does not support restart. Use the trigger (Run Now) endpoint instead.`);
     }
 
     return await withAutoRetry(async () => {
