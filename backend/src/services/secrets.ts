@@ -22,7 +22,12 @@ const APP_SECRET_NAMES: Record<string, string> = {
     'tad': 'tad',
     'rmx': 'rmx',
     'remora': 'pamadmin',
-    'psi': 'psi',
+};
+
+// Apps with a custom full-path template (env is substituted for {env})
+// PSI uses /pam/psi/{env} (Spring Cloud AWS: prefix=/pam, name=psi, profile-separator=/)
+const APP_SECRET_CUSTOM_PATHS: Record<string, string> = {
+    'psi': '/pam/psi/{env}',
 };
 
 let smClient: SecretsManagerClient | null = null;
@@ -60,8 +65,11 @@ export async function getAppSecrets(
     env: 'qa' | 'dev'
 ): Promise<SecretsResult> {
     const envSegment = ENV_MAP[env] ?? env;
-    const appSegment = APP_SECRET_NAMES[appId] ?? appId;
-    const secretId = `pam/${envSegment}/${appSegment}`;
+    // Check for a custom full-path override first (e.g. PSI uses /pam/psi/{env})
+    const customPath = APP_SECRET_CUSTOM_PATHS[appId];
+    const secretId = customPath
+        ? customPath.replace('{env}', envSegment)
+        : `pam/${envSegment}/${APP_SECRET_NAMES[appId] ?? appId}`;
 
     const client = getClient();
 

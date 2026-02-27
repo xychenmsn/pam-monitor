@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { API_BASE, type LogEvent, getStreamList, getLogEvents } from '@/lib/cloudwatch'
+import { type LogEvent, getStreamList, getLogEvents } from '@/lib/cloudwatch'
 
 interface AppLogsState {
   logs: LogEvent[]
@@ -81,13 +81,30 @@ export function useAppLogsManager() {
         nextForwardToken: initialData.nextForwardToken
       });
 
-      // 3. Start Polling Loop
+      // Single poll loop: every 3s check for a newer stream AND fetch new log events.
+      // getStreamList is a cheap DescribeLogStreams call — no need for a separate watcher.
       const intervalId = setInterval(async () => {
         const currentState = appLogsMapRef.current.get(key);
         if (!currentState || !currentState.connected || !currentState.streamName) return;
 
         try {
-          // Poll using the forward token
+          // Step 1: Check if a newer stream has appeared (handles restarts and PSI new runs)
+          const streams: string[] = await getStreamList(env, appName);
+          const latestStream = streams?.[0];
+          if (latestStream && latestStream !== currentState.streamName) {
+            console.log(`[${key}] New stream detected: ${latestStream}`);
+            const freshData = await getLogEvents(env, latestStream, 1000, false);
+            updateAppState(key, {
+              streamName: latestStream,
+              logs: freshData.events,
+              nextForwardToken: freshData.nextForwardToken,
+              connected: true,
+              error: null,
+            });
+            return; // Skip the normal token poll this tick — we just loaded fresh
+          }
+
+          // Step 2: Normal forward-token poll for new events on the current stream
           const result = await getLogEvents(
             env,
             currentState.streamName,
@@ -102,13 +119,10 @@ export function useAppLogsManager() {
               nextForwardToken: result.nextForwardToken
             });
           } else if (result.nextForwardToken && result.nextForwardToken !== currentState.nextForwardToken) {
-            // Even if 0 events, update token if changed (AWS sometimes rotates tokens even for empty)
             updateAppState(key, { nextForwardToken: result.nextForwardToken });
           }
         } catch (err: any) {
           console.error(`[${key}] Polling error:`, err);
-          // If auth error, it might recover automatically via backend retry, 
-          // but if persistent, maybe show warning? For now just log.
         }
       }, 3000); // Poll every 3 seconds
 
