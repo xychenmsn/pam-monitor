@@ -1,13 +1,6 @@
-import {
-  CloudWatchLogsClient,
-  DescribeLogStreamsCommand,
-  DescribeLogGroupsCommand,
-  FilterLogEventsCommand,
-  GetLogEventsCommand,
-  StartLiveTailCommand,
-} from '@aws-sdk/client-cloudwatch-logs';
+import { CloudWatchLogsClient, DescribeLogStreamsCommand, DescribeLogGroupsCommand, FilterLogEventsCommand, GetLogEventsCommand, StartLiveTailCommand } from '@aws-sdk/client-cloudwatch-logs';
 import { ECSClient } from '@aws-sdk/client-ecs';
-import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { withAwsRecovery, getCredentialProvider } from './auth.js';
 
 export const LOG_GROUPS = {
   qa: 'custom-apps-pam-cloudwatch-qa',
@@ -45,117 +38,49 @@ const REGION = 'us-east-1';
 let cwClient: CloudWatchLogsClient | null = null;
 let ecsClient: ECSClient | null = null;
 
-export async function getClient(): Promise<CloudWatchLogsClient> {
-  if (cwClient) return cwClient;
+export async function getClient(forceRefetch: boolean = false): Promise<CloudWatchLogsClient> {
+  if (cwClient && !forceRefetch) return cwClient;
 
-  try {
-    cwClient = new CloudWatchLogsClient({
-      region: REGION,
-      credentials: fromNodeProviderChain(),
-    });
-    return cwClient;
-  } catch (error) {
-    console.warn('Failed to load credentials from chain');
-    cwClient = new CloudWatchLogsClient({ region: REGION });
-    return cwClient;
-  }
+  cwClient = new CloudWatchLogsClient({
+    region: REGION,
+    credentials: getCredentialProvider(forceRefetch),
+  });
+  return cwClient;
 }
 
-export async function getECSClient(): Promise<ECSClient> {
-  if (ecsClient) return ecsClient;
+export async function getECSClient(forceRefetch: boolean = false): Promise<ECSClient> {
+  if (ecsClient && !forceRefetch) return ecsClient;
 
-  try {
-    ecsClient = new ECSClient({
-      region: REGION,
-      credentials: fromNodeProviderChain(),
-    });
-    return ecsClient;
-  } catch (error) {
-    console.warn('Failed to load ECS credentials from chain');
-    ecsClient = new ECSClient({ region: REGION });
-    return ecsClient;
-  }
+  ecsClient = new ECSClient({
+    region: REGION,
+    credentials: getCredentialProvider(forceRefetch),
+  });
+  return ecsClient;
 }
 
 /**
- * Check if an error is an AWS credentials/auth error
+ * Invalidate cached AWS clients to force fresh creation
  */
-function isAuthError(error: any): boolean {
-  if (!error) return false;
-  const errorCode = error.name || error.Code || error.errorCode || error.__type || '';
-  const errorMessage = error.message || error.Message || error.errorMessage || '';
-
-  const isAuth = (
-    errorCode === 'ExpiredTokenException' ||
-    errorCode === 'UnauthorizedException' ||
-    errorCode === 'InvalidClientTokenId' ||
-    errorCode === 'SignatureDoesNotMatch' ||
-    errorCode.includes('ExpiredToken') ||
-    errorMessage.includes('security token') ||
-    errorMessage.includes('credentials') ||
-    errorMessage.includes('unauthorized') ||
-    errorMessage.includes('expired')
-  );
-
-  if (isAuth) {
-    console.log(`[AUTH] Detected authentication error: code="${errorCode}", message="${errorMessage.substring(0, 100)}..."`);
-  }
-
-  return isAuth;
+export function invalidateClients() {
+  cwClient = null;
+  ecsClient = null;
 }
 
 /**
  * Wrapper that automatically retries with fresh credentials on auth errors
  */
 export async function withAutoRetry<T>(
-  fn: (client: CloudWatchLogsClient) => Promise<T>
+  fn: (client: CloudWatchLogsClient, forceRefetch: boolean) => Promise<T>
 ): Promise<T> {
-  let client = await getClient();
-  try {
-    return await fn(client);
-  } catch (error: any) {
-    if (isAuthError(error)) {
-      console.log('⚠️  AWS credentials expired. Starting auto-recovery...');
-
-      // Diagnostic: Check credentials file status
-      try {
-        const stats = fs.statSync(path.join(process.env.HOME || '', '.aws/credentials'));
-        console.log(`[AUTH] ~/.aws/credentials last modified: ${stats.mtime.toISOString()}`);
-      } catch (e) {
-        console.warn('[AUTH] Could not stat ~/.aws/credentials');
-      }
-
-      // Invalidate both clients to force fresh creation on next attempt
-      console.log('[AUTH] Invalidating client cache...');
-      cwClient = null;
-      ecsClient = null;
-
-      // Check for stale environment variables which might block reading from updated ~/.aws/credentials
-      if (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_PROFILE) {
-        console.log(`[AUTH] Current Environment: AWS_PROFILE=${process.env.AWS_PROFILE}, HAS_KEY=${!!process.env.AWS_ACCESS_KEY_ID}`);
-        console.log('[AUTH] Clearing AWS environment variables to force fallback to shared credentials file...');
-        delete process.env.AWS_ACCESS_KEY_ID;
-        delete process.env.AWS_SECRET_ACCESS_KEY;
-        delete process.env.AWS_SESSION_TOKEN;
-        delete process.env.AWS_SECURITY_TOKEN;
-        // Do NOT delete AWS_PROFILE if it's explicitly set to 'saml', as it might be needed
-        // but we want to make sure the PROVIDER chain re-evaluates.
-      }
-
-      console.log('[AUTH] Retrying with fresh client creation...');
-      // Create a fresh client that will read new credentials from file/provider
-      client = await getClient();
-      try {
-        const result = await fn(client);
-        console.log('[AUTH] ✅ Retry successful!');
-        return result;
-      } catch (retryError: any) {
-        console.error('[AUTH] ❌ Retry failed even after clearing cache:', retryError.name || retryError.__type || retryError.message);
-        throw retryError;
-      }
+  return withAwsRecovery(
+    async (forceRefetch) => {
+      const client = await getClient(forceRefetch);
+      return await fn(client, forceRefetch);
+    },
+    () => {
+      invalidateClients();
     }
-    throw error;
-  }
+  );
 }
 
 /**

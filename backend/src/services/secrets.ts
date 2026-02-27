@@ -1,9 +1,5 @@
-import {
-    SecretsManagerClient,
-    GetSecretValueCommand,
-    ResourceNotFoundException,
-} from '@aws-sdk/client-secrets-manager';
-import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { SecretsManagerClient, GetSecretValueCommand, ResourceNotFoundException } from '@aws-sdk/client-secrets-manager';
+import { withAwsRecovery, getCredentialProvider } from './auth.js';
 
 const REGION = 'us-east-1';
 
@@ -32,11 +28,11 @@ const APP_SECRET_CUSTOM_PATHS: Record<string, string> = {
 
 let smClient: SecretsManagerClient | null = null;
 
-function getClient(): SecretsManagerClient {
-    if (smClient) return smClient;
+function getClient(forceRefetch: boolean = false): SecretsManagerClient {
+    if (smClient && !forceRefetch) return smClient;
     smClient = new SecretsManagerClient({
         region: REGION,
-        credentials: fromNodeProviderChain(),
+        credentials: getCredentialProvider(forceRefetch),
     });
     return smClient;
 }
@@ -71,47 +67,38 @@ export async function getAppSecrets(
         ? customPath.replace('{env}', envSegment)
         : `pam/${envSegment}/${APP_SECRET_NAMES[appId] ?? appId}`;
 
-    const client = getClient();
+    return withAwsRecovery(
+        async (forceRefetch) => {
+            const client = getClient(forceRefetch);
+            const command = new GetSecretValueCommand({ SecretId: secretId });
+            const response = await client.send(command);
 
-    try {
-        const command = new GetSecretValueCommand({ SecretId: secretId });
-        const response = await client.send(command);
+            const raw = response.SecretString;
+            if (!raw) {
+                return { secretId, entries: [], error: 'Secret has no string value' };
+            }
 
-        const raw = response.SecretString;
-        if (!raw) {
-            return { secretId, entries: [], error: 'Secret has no string value' };
-        }
+            let parsed: Record<string, string>;
+            try {
+                parsed = JSON.parse(raw);
+            } catch {
+                // Not JSON — return as a single entry
+                return {
+                    secretId,
+                    entries: [{ key: 'RAW_VALUE', value: raw }],
+                };
+            }
 
-        let parsed: Record<string, string>;
-        try {
-            parsed = JSON.parse(raw);
-        } catch {
-            // Not JSON — return as a single entry
-            return {
-                secretId,
-                entries: [{ key: 'RAW_VALUE', value: raw }],
-            };
-        }
+            const entries: SecretEntry[] = Object.entries(parsed)
+                .map(([key, value]) => ({ key, value: String(value) }))
+                .sort((a, b) => a.key.localeCompare(b.key));
 
-        const entries: SecretEntry[] = Object.entries(parsed)
-            .map(([key, value]) => ({ key, value: String(value) }))
-            .sort((a, b) => a.key.localeCompare(b.key));
-
-        return { secretId, entries };
-    } catch (err: any) {
-        // Invalidate client on auth errors so next call retries
-        const name = err.name || '';
-        if (
-            name === 'ExpiredTokenException' ||
-            name === 'UnauthorizedException' ||
-            name === 'InvalidClientTokenId' ||
-            (err.message || '').includes('security token') ||
-            (err.message || '').includes('expired')
-        ) {
+            return { secretId, entries };
+        },
+        () => {
             invalidateClient();
-            throw err; // Re-throw so the route layer can return 401
         }
-
+    ).catch((err: any) => {
         if (err instanceof ResourceNotFoundException) {
             return {
                 secretId,
@@ -125,5 +112,5 @@ export async function getAppSecrets(
             entries: [],
             error: err.message || 'Unknown error fetching secret',
         };
-    }
+    });
 }

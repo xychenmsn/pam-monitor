@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Search, Folder, File, ChevronRight, ChevronDown, Copy, Check, FileJson, AlertCircle } from 'lucide-react';
+import { Search, Folder, File, ChevronRight, ChevronDown, Copy, Check, FileJson, AlertCircle, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface PsiPayloadFile {
@@ -32,6 +32,37 @@ export default function PsiPayloadViewer({ appName, environment }: PsiPayloadVie
     const [fileContent, setFileContent] = useState<string | null>(null);
     const [contentError, setContentError] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
+
+    const [leftWidth, setLeftWidth] = useState(320);
+    const [isResizing, setIsResizing] = useState(false);
+
+    useEffect(() => {
+        const handleMouseMove = (e: MouseEvent) => {
+            if (!isResizing) return;
+            // min width 200, max width window.innerWidth - 300
+            const newWidth = Math.max(200, Math.min(e.clientX, window.innerWidth - 300));
+            setLeftWidth(newWidth);
+        };
+
+        const handleMouseUp = () => {
+            setIsResizing(false);
+        };
+
+        if (isResizing) {
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            // Prevent text selection while resizing
+            document.body.style.userSelect = 'none';
+        } else {
+            document.body.style.userSelect = '';
+        }
+
+        return () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+            document.body.style.userSelect = '';
+        };
+    }, [isResizing]);
 
     useEffect(() => {
         loadFiles();
@@ -82,12 +113,19 @@ export default function PsiPayloadViewer({ appName, environment }: PsiPayloadVie
     };
 
     const toggleFolder = (folder: string) => {
-        setExpandedFolders(prev => {
+        setExpandedFolders((prev: Set<string>) => {
             const next = new Set(prev);
             if (next.has(folder)) {
                 next.delete(folder);
             } else {
                 next.add(folder);
+                // Auto-select summary file if exists
+                const summaryFile = (tree as FileTree)[folder]?.find(f =>
+                    f.filename.toLowerCase().includes('summary')
+                );
+                if (summaryFile) {
+                    handleSelectFile(summaryFile);
+                }
             }
             return next;
         });
@@ -109,7 +147,7 @@ export default function PsiPayloadViewer({ appName, environment }: PsiPayloadVie
         let filtered = files;
         if (searchTerm) {
             const lower = searchTerm.toLowerCase();
-            filtered = files.filter(f =>
+            filtered = files.filter((f: PsiPayloadFile) =>
                 f.filename.toLowerCase().includes(lower) ||
                 f.folder.toLowerCase().includes(lower)
             );
@@ -163,7 +201,10 @@ export default function PsiPayloadViewer({ appName, environment }: PsiPayloadVie
     return (
         <div className="flex h-full bg-[#1a1a1a] overflow-hidden">
             {/* Left Panel: Tree View */}
-            <div className="w-80 border-r border-[#333] flex flex-col bg-[#1e1e1e] flex-shrink-0">
+            <div
+                className="border-r border-[#333] flex flex-col bg-[#1e1e1e] flex-shrink-0"
+                style={{ width: leftWidth }}
+            >
                 <div className="p-4 border-b border-[#333]">
                     <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
@@ -172,8 +213,16 @@ export default function PsiPayloadViewer({ appName, environment }: PsiPayloadVie
                             placeholder="Search folders or files..."
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}
-                            className="w-full bg-[#252525] border border-[#404040] rounded-lg pl-9 pr-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                            className="w-full bg-[#252525] border border-[#404040] rounded-lg pl-9 pr-9 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
                         />
+                        {searchTerm && (
+                            <button
+                                onClick={() => setSearchTerm('')}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -183,7 +232,7 @@ export default function PsiPayloadViewer({ appName, environment }: PsiPayloadVie
                             No files found.
                         </div>
                     ) : (
-                        Object.entries(tree).map(([folder, folderFiles]) => {
+                        Object.entries(tree as FileTree).map(([folder, folderFiles]: [string, PsiPayloadFile[]]) => {
                             const isExpanded = expandedFolders.has(folder);
                             return (
                                 <div key={folder} className="mb-1">
@@ -232,6 +281,15 @@ export default function PsiPayloadViewer({ appName, environment }: PsiPayloadVie
                     )}
                 </div>
             </div>
+
+            {/* Resizer */}
+            <div
+                className="w-1 cursor-col-resize hover:bg-blue-500/50 active:bg-blue-500 flex-shrink-0 z-10 border-l border-transparent hover:border-[#444] transition-colors"
+                onMouseDown={(e) => {
+                    e.preventDefault();
+                    setIsResizing(true);
+                }}
+            />
 
             {/* Main Panel: Preview */}
             <div className="flex-1 flex flex-col overflow-hidden bg-[#1e1e1e]">

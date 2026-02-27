@@ -1,13 +1,7 @@
-import {
-    CloudWatchEventsClient,
-    DescribeRuleCommand,
-    ListTargetsByRuleCommand,
-    PutRuleCommand,
-    EnableRuleCommand,
-    DisableRuleCommand,
-} from '@aws-sdk/client-cloudwatch-events';
+import { CloudWatchEventsClient, DescribeRuleCommand, ListTargetsByRuleCommand, PutRuleCommand, EnableRuleCommand, DisableRuleCommand } from '@aws-sdk/client-cloudwatch-events';
 import { ECSClient, RunTaskCommand, ListTasksCommand, DescribeTasksCommand } from '@aws-sdk/client-ecs';
 import { withAutoRetry, getECSClient } from './cloudwatch.js';
+import { withAwsRecovery, getCredentialProvider } from './auth.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -19,10 +13,12 @@ const allApps = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 
 let cwClient: CloudWatchEventsClient | null = null;
 
-async function getCWClient(): Promise<CloudWatchEventsClient> {
-    if (!cwClient) {
-        cwClient = new CloudWatchEventsClient({ region: 'us-east-1' });
-    }
+async function getCWClient(forceRefetch: boolean = false): Promise<CloudWatchEventsClient> {
+    if (cwClient && !forceRefetch) return cwClient;
+    cwClient = new CloudWatchEventsClient({
+        region: 'us-east-1',
+        credentials: getCredentialProvider(forceRefetch)
+    });
     return cwClient;
 }
 
@@ -47,47 +43,59 @@ export interface SchedulerRuleInfo {
  * Get details of a CloudWatch Events scheduler rule + its ECS targets
  */
 export async function getSchedulerRule(ruleName: string, _env: string): Promise<SchedulerRuleInfo> {
-    const cw = await getCWClient();
+    return withAwsRecovery(
+        async (forceRefetch) => {
+            const cw = await getCWClient(forceRefetch);
 
-    const [ruleRes, targetsRes] = await Promise.all([
-        cw.send(new DescribeRuleCommand({ Name: ruleName })),
-        cw.send(new ListTargetsByRuleCommand({ Rule: ruleName })),
-    ]);
+            const [ruleRes, targetsRes] = await Promise.all([
+                cw.send(new DescribeRuleCommand({ Name: ruleName })),
+                cw.send(new ListTargetsByRuleCommand({ Rule: ruleName })),
+            ]);
 
-    const targets = (targetsRes.Targets || []).map((t: any) => ({
-        id: t.Id || '',
-        arn: t.Arn || '',
-        taskDefinitionArn: t.EcsParameters?.TaskDefinitionArn || '',
-        taskCount: t.EcsParameters?.TaskCount || 1,
-        launchType: t.EcsParameters?.LaunchType || 'FARGATE',
-        subnets: t.EcsParameters?.NetworkConfiguration?.awsvpcConfiguration?.Subnets || [],
-        securityGroups: t.EcsParameters?.NetworkConfiguration?.awsvpcConfiguration?.SecurityGroups || [],
-    }));
+            const targets = (targetsRes.Targets || []).map((t: any) => ({
+                id: t.Id || '',
+                arn: t.Arn || '',
+                taskDefinitionArn: t.EcsParameters?.TaskDefinitionArn || '',
+                taskCount: t.EcsParameters?.TaskCount || 1,
+                launchType: t.EcsParameters?.LaunchType || 'FARGATE',
+                subnets: t.EcsParameters?.NetworkConfiguration?.awsvpcConfiguration?.Subnets || [],
+                securityGroups: t.EcsParameters?.NetworkConfiguration?.awsvpcConfiguration?.SecurityGroups || [],
+            }));
 
-    return {
-        name: ruleRes.Name || ruleName,
-        arn: ruleRes.Arn || '',
-        scheduleExpression: ruleRes.ScheduleExpression || '',
-        state: ruleRes.State || 'UNKNOWN',
-        description: ruleRes.Description,
-        targets,
-    };
+            return {
+                name: ruleRes.Name || ruleName,
+                arn: ruleRes.Arn || '',
+                scheduleExpression: ruleRes.ScheduleExpression || '',
+                state: ruleRes.State || 'UNKNOWN',
+                description: ruleRes.Description,
+                targets,
+            };
+        },
+        () => { cwClient = null; }
+    );
 }
 
 /**
  * Enable a CloudWatch Events rule (resume scheduled runs)
  */
 export async function enableSchedulerRule(ruleName: string): Promise<void> {
-    const cw = await getCWClient();
-    await cw.send(new EnableRuleCommand({ Name: ruleName }));
+    await withAwsRecovery(
+        async (forceRefetch) => {
+            const cw = await getCWClient(forceRefetch);
+            await cw.send(new EnableRuleCommand({ Name: ruleName }));
+        },
+        () => { cwClient = null; }
+    );
 }
 
-/**
- * Disable a CloudWatch Events rule (pause scheduled runs)
- */
 export async function disableSchedulerRule(ruleName: string): Promise<void> {
-    const cw = await getCWClient();
-    await cw.send(new DisableRuleCommand({ Name: ruleName }));
+    await withAwsRecovery(
+        async (forceRefetch) => {
+            const cw = await getCWClient(forceRefetch);
+            await cw.send(new DisableRuleCommand({ Name: ruleName }));
+        },
+        () => { cwClient = null; }
+    );
 }
 
 /**
@@ -98,19 +106,24 @@ export async function updateSchedulerRule(
     scheduleExpression: string,
     _env: string
 ): Promise<{ success: boolean; ruleArn?: string }> {
-    const cw = await getCWClient();
+    return withAwsRecovery(
+        async (forceRefetch) => {
+            const cw = await getCWClient(forceRefetch);
 
-    // First get current rule to preserve all other settings
-    const currentRule = await cw.send(new DescribeRuleCommand({ Name: ruleName }));
+            // First get current rule to preserve all other settings
+            const currentRule = await cw.send(new DescribeRuleCommand({ Name: ruleName }));
 
-    const res = await cw.send(new PutRuleCommand({
-        Name: ruleName,
-        ScheduleExpression: scheduleExpression,
-        State: currentRule.State,
-        Description: currentRule.Description,
-    }));
+            const res = await cw.send(new PutRuleCommand({
+                Name: ruleName,
+                ScheduleExpression: scheduleExpression,
+                State: currentRule.State,
+                Description: currentRule.Description,
+            }));
 
-    return { success: true, ruleArn: res.RuleArn };
+            return { success: true, ruleArn: res.RuleArn };
+        },
+        () => { cwClient = null; }
+    );
 }
 
 /**
