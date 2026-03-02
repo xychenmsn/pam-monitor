@@ -1,4 +1,5 @@
 import { Menu } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Button } from './ui/button'
 import {
   Select,
@@ -32,7 +33,12 @@ export default function Navbar({
         </Button>
 
         <div className="flex items-center gap-2">
-          <span className="font-semibold">PAM Log Monitor</span>
+          <Link
+            to={`/?env=${environment}`}
+            className="font-semibold transition-colors hover:text-primary"
+          >
+            PAM Monitor
+          </Link>
           <span className="text-muted-foreground">|</span>
           <Select
             value={environment}
