@@ -1,5 +1,5 @@
 import { CloudWatchLogsClient, DescribeLogStreamsCommand, DescribeLogGroupsCommand, FilterLogEventsCommand, GetLogEventsCommand, StartLiveTailCommand } from '@aws-sdk/client-cloudwatch-logs';
-import { ECSClient } from '@aws-sdk/client-ecs';
+import { ECSClient, ListTasksCommand } from '@aws-sdk/client-ecs';
 import { withAwsRecovery, getCredentialProvider } from './auth.js';
 
 export const LOG_GROUPS = {
@@ -138,20 +138,64 @@ export async function listApps(env: 'qa' | 'dev' = 'qa') {
 
 /**
  * Get the latest log stream for an app
- * Optimized to find the latest active stream by time
+ * Optimized to find the exact active stream by querying ECS directly.
  */
 export async function getStreamList(env: 'qa' | 'dev', appName: string): Promise<string[]> {
   const config = getAppConfig(env, appName);
   const logStreamPrefix = config?.logStreamPrefix || `ecs/${appName}`;
   const logGroupName = config?.logGroup || LOG_GROUPS[env];
 
-  return await withAutoRetry(async (client) => {
-    let nextToken: string | undefined = undefined;
+  return await withAutoRetry(async (client, forceRefetch) => {
+    // 1. Ask ECS for running tasks to determine exact stream names
+    if (config && !config.isScheduledTask && config.cluster && config.service) {
+      try {
+        const ecs = await getECSClient(forceRefetch);
+        const listCmd = new ListTasksCommand({
+          cluster: config.cluster,
+          serviceName: config.service,
+          desiredStatus: 'RUNNING'
+        });
+        const listRes = await ecs.send(listCmd);
+        const taskArns = listRes.taskArns || [];
 
-    // We want the LATEST stream for this app.
-    // AWS doesn't support 'orderBy: LastEventTime' combined with 'logStreamNamePrefix'.
-    // Strategy: Fetch streams ordered by LastEventTime (globally for the group) and find the first one matching our prefix.
-    // We scan up to 5 pages (250 streams) which covers most active scenarios.
+        if (taskArns.length > 0) {
+          // Construct expected log stream names: <prefix>/<container-name>/<task-id>
+          // Note: container-name usually matches the service/app name minus "qa" or "-service" 
+          // but the prefix in config usually captures "ecs/<container-name>".
+          // So if logStreamPrefix is "ecs/pamqa", generated stream is "ecs/pamqa/<task-id>"
+          const streamNames = taskArns.map(arn => {
+            const taskId = arn.split('/').pop();
+            return `${logStreamPrefix}/${taskId}`;
+          });
+
+          // Verify these streams actually exist in CloudWatch (to handle starting tasks)
+          const validStreams: string[] = [];
+          for (const sName of streamNames) {
+            try {
+              const checkCmd = new DescribeLogStreamsCommand({
+                logGroupName,
+                logStreamNamePrefix: sName,
+              });
+              const checkRes = await client.send(checkCmd);
+              if (checkRes.logStreams && checkRes.logStreams.length > 0) {
+                validStreams.push(sName);
+              }
+            } catch (e) {
+              console.warn(`Failed to verify stream ${sName}:`, e);
+            }
+          }
+
+          if (validStreams.length > 0) {
+            return validStreams;
+          }
+        }
+      } catch (err) {
+        console.warn(`Failed to get ECS tasks for ${appName}, falling back to CloudWatch scan:`, err);
+      }
+    }
+
+    // 2. Fallback: CloudWatch scan (mainly for scheduled tasks like PSI that aren't 'SERVICES')
+    let nextToken: string | undefined = undefined;
 
     for (let i = 0; i < 5; i++) {
       const command = new DescribeLogStreamsCommand({
@@ -165,19 +209,17 @@ export async function getStreamList(env: 'qa' | 'dev', appName: string): Promise
       const response: any = await client.send(command as any);
       const streams = response.logStreams || [];
 
-      // Find the first stream that matches our app
-      const match = streams.find((s: any) => s.logStreamName && s.logStreamName.startsWith(logStreamPrefix));
+      // Find all streams that match our app
+      const matches = streams.filter((s: any) => s.logStreamName && s.logStreamName.startsWith(logStreamPrefix));
 
-      if (match && match.logStreamName) {
-        return [match.logStreamName];
+      if (matches.length > 0) {
+        return matches.map((m: any) => m.logStreamName);
       }
 
       nextToken = response.nextToken;
       if (!nextToken) break;
     }
 
-    // If we didn't find it in the top 250 active streams, fallback to prefix search (slower/unordered) 
-    // or just return empty. Let's return empty for now as it implies the app hasn't been active recently.
     return [];
   });
 }
@@ -330,8 +372,9 @@ export async function fetchLatestLogs(
 
   return await withAutoRetry(async (client) => {
     const allEvents = [];
-    // Use provided startTime or default to last 24 hours
-    const effectiveStartTime = startTime ?? (Date.now() - 24 * 60 * 60 * 1000);
+    // Use provided startTime or default to last 7 days 
+    // (24h was too strict for apps like RMX/PAM that might not log every day)
+    const effectiveStartTime = startTime ?? (Date.now() - 7 * 24 * 60 * 60 * 1000);
 
     const command = new FilterLogEventsCommand({
       logGroupName,
