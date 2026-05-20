@@ -65,6 +65,42 @@ export async function getAppDetails(appName: string, env: 'qa' | 'dev'): Promise
         throw new Error(`App ${appName} not found in config for ${env}`);
     }
 
+    // Bypass ECS calls entirely for static/managed resources like RabbitMQ
+    if (!appConfig.cluster) {
+        return {
+            overview: {
+                status: 'RUNNING',
+                displayName: appConfig.name,
+                runningCount: 1,
+                desiredCount: 1,
+                createdAt: new Date(),
+                clusterArn: 'N/A',
+                serviceArn: 'N/A'
+            },
+            events: [
+                {
+                    id: 'mq-1',
+                    createdAt: new Date(),
+                    message: `Broker customapps-nonprod-rabbitMQ is actively running.`
+                }
+            ],
+            tasks: [],
+            configuration: {
+                taskDefinitionArn: 'N/A',
+                image: 'RabbitMQ 3.13.7 (Managed)',
+                cpu: 'mq.m7g.medium',
+                memory: 'EBS Backed',
+                environment: {
+                    ENGINE_VERSION: '3.13.7',
+                    DEPLOYMENT_MODE: 'SINGLE_INSTANCE',
+                    REGION: 'us-east-1',
+                    HOST: 'customapps-nonprod-rabbitMQ'
+                }
+            },
+            deployments: []
+        };
+    }
+
     return await withAwsRecovery(
         async (forceRefetch) => {
             const ecs = await getECSClient(forceRefetch);
@@ -224,6 +260,10 @@ export async function restartService(appName: string, env: 'qa' | 'dev'): Promis
 
     if (!appConfig) {
         throw new Error(`App ${appName} not found in config for ${env}`);
+    }
+
+    if (!appConfig.cluster) {
+        throw new Error(`Restart is not supported for static resource ${appName}`);
     }
 
     if (appConfig.isScheduledTask) {

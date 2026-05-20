@@ -8,29 +8,55 @@ export const LOG_GROUPS = {
 };
 
 export const APP_DISPLAY_NAMES: Record<string, string> = {
-  pamadminqa: 'PAM Admin',
-  pamapiqa: 'PAM API',
-  'pamapiqa-worker': 'PAM API Worker',
-  pamqa: 'PAM QA',
-  rmxqa: 'RMX',
-  'rmxqa-worker': 'RMX Worker',
-  gatewayadminqa: 'Gateway Admin',
-  psiqa: 'PSI',
+  pamadminqa: 'PAM Admin (QA)',
+  pamadmindev: 'PAM Admin (Dev)',
+  pamapiqa: 'PAM API (QA)',
+  pamapidev: 'PAM API (Dev)',
+  'pamapiqa-worker': 'PAM API Worker (QA)',
+  'pamapidev-worker': 'PAM API Worker (Dev)',
+  pamqa: 'PAM (QA)',
+  pamdev: 'PAM (Dev)',
+  rmxqa: 'RMX (QA)',
+  rmxdev: 'RMX (Dev)',
+  'rmxqa-worker': 'RMX Worker (QA)',
+  'rmxdev-worker': 'RMX Worker (Dev)',
+  gatewayadminqa: 'Gateway Admin (QA)',
+  gatewayadmindev: 'Gateway Admin (Dev)',
+  pammanagementqa: 'Agency Gateway API (QA)',
+  pammanagementdev: 'Agency Gateway API (Dev)',
+  'gatewayapiqa-worker': 'Agency Gateway Worker (QA)',
+  'gatewayapidev-worker': 'Agency Gateway Worker (Dev)',
+  psiqa: 'PSI (QA)',
   psi: 'PSI',
+  rabbitmq: 'RabbitMQ Broker',
 };
 
 export const APP_PREFIXES = [
   'pamadminqa',
+  'pamadmindev',
   'pamapiqa',
+  'pamapidev',
   'pamapiqa-worker',
+  'pamapidev-worker',
   'pamqa',
+  'pamdev',
   'rmxqa',
+  'rmxdev',
   'rmxqa-worker',
+  'rmxdev-worker',
   'rmxqa-migrations',
+  'rmxdev-migrations',
   'gatewayadminqa',
+  'gatewayadmindev',
   'psiqa',
+  'psidev',
   'tadqa',
+  'taddev',
   'pammanagementqa',
+  'pammanagementdev',
+  'gatewayapiqa-worker',
+  'gatewayapidev-worker',
+  'rabbit@localhost_general.log',
 ];
 
 const REGION = 'us-east-1';
@@ -225,6 +251,22 @@ export async function getStreamList(env: 'qa' | 'dev', appName: string): Promise
 }
 
 /**
+ * Helper to dynamically resolve the log group name for a given stream name
+ */
+function getLogGroupNameForStream(env: 'qa' | 'dev', streamName: string): string {
+  let logGroupName = LOG_GROUPS[env];
+  const appsConfig = allApps[env] || [];
+  const matchingApp = appsConfig.find((app: any) => 
+    app.logStreamPrefix && 
+    (streamName.startsWith(app.logStreamPrefix) || app.logStreamPrefix.startsWith(streamName))
+  );
+  if (matchingApp && matchingApp.logGroup) {
+    logGroupName = matchingApp.logGroup;
+  }
+  return logGroupName;
+}
+
+/**
  * Fetch logs from a specific stream with time range
  */
 export async function fetchLogsFromStream(
@@ -235,7 +277,7 @@ export async function fetchLogsFromStream(
 ) {
   try {
     return await withAutoRetry(async (client) => {
-      const logGroupName = LOG_GROUPS[env];
+      const logGroupName = getLogGroupNameForStream(env, streamName);
       const allEvents: { timestamp: number; stream: string; message: string }[] = [];
       let nextToken: string | undefined = undefined;
 
@@ -290,7 +332,7 @@ export async function getLogEvents(
   nextToken?: string
 ) {
   return await withAutoRetry(async (client) => {
-    const logGroupName = LOG_GROUPS[env];
+    const logGroupName = getLogGroupNameForStream(env, streamName);
     const command = new GetLogEventsCommand({
       logGroupName,
       logStreamName: streamName,
@@ -329,8 +371,9 @@ export async function fetchNewLogsFromStreams(
     const allEvents = [];
 
     for (const { streamName, startTime } of streams) {
+      const logGroupName = getLogGroupNameForStream(env, streamName);
       const command = new FilterLogEventsCommand({
-        logGroupName: LOG_GROUPS[env],
+        logGroupName,
         logStreamNames: [streamName],
         startTime: startTime + 1,
         limit: 100,

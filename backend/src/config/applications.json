@@ -25,6 +25,14 @@
             "service": "pamapiqa-service"
         },
         {
+            "id": "pam-api-worker",
+            "name": "PAM API Worker (pamapi-worker)",
+            "logGroup": "custom-apps-pam-cloudwatch-qa",
+            "logStreamPrefix": "ecs/pamapiqa-worker",
+            "cluster": "ecs-custom-apps-pam-qa",
+            "service": "pamapiqa-worker-service"
+        },
+        {
             "id": "tad",
             "name": "TAD",
             "logGroup": "custom-apps-pam-cloudwatch-qa",
@@ -50,6 +58,37 @@
             "isScheduledTask": true,
             "taskFamily": "psiqa-task-family",
             "schedulerRule": "psiqa-task-scheduler"
+        },
+        {
+            "id": "ag-admin",
+            "name": "Gateway Admin (ag-admin)",
+            "logGroup": "custom-apps-pam-cloudwatch-qa",
+            "logStreamPrefix": "ecs/gatewayadminqa",
+            "cluster": "ecs-custom-apps-pam-qa",
+            "service": "gatewayadminqa-service"
+        },
+        {
+            "id": "agency-gateway-api",
+            "name": "Agency Gateway API (pammanagement)",
+            "logGroup": "custom-apps-pam-cloudwatch-qa",
+            "logStreamPrefix": "ecs/pammanagementqa",
+            "cluster": "ecs-custom-apps-pam-qa",
+            "service": "pammanagementqa-service"
+        },
+        {
+            "id": "gateway-worker",
+            "name": "Agency Gateway Worker (gateway-worker)",
+            "logGroup": "custom-apps-pam-external-cloudwatch-qa",
+            "logStreamPrefix": "ecs/gatewayapiqa-worker",
+            "cluster": "ecs-custom-apps-pam-external-qa",
+            "service": "gatewayapiqa-worker-service"
+        },
+        {
+            "id": "rabbitmq",
+            "name": "RabbitMQ Broker",
+            "logGroup": "/aws/amazonmq/broker/b-be411d2c-684d-4f18-86db-626eb59af1a2/general",
+            "logStreamPrefix": "rabbit@localhost_general.log",
+            "isScheduledTask": true
         }
     ],
     "dev": [
@@ -78,6 +117,14 @@
             "service": "pamapidev-service"
         },
         {
+            "id": "pam-api-worker",
+            "name": "PAM API Worker (pamapi-worker)",
+            "logGroup": "custom-apps-pam-cloudwatch-dev",
+            "logStreamPrefix": "ecs/pamapidev-worker",
+            "cluster": "ecs-custom-apps-pam-dev",
+            "service": "pamapidev-worker-service"
+        },
+        {
             "id": "tad",
             "name": "TAD",
             "logGroup": "custom-apps-pam-cloudwatch-dev",
@@ -92,6 +139,37 @@
             "logStreamPrefix": "ecs/pamadmindev",
             "cluster": "ecs-custom-apps-pam-dev",
             "service": "pamadmindev-service"
+        },
+        {
+            "id": "ag-admin",
+            "name": "Gateway Admin (ag-admin)",
+            "logGroup": "custom-apps-pam-cloudwatch-dev",
+            "logStreamPrefix": "ecs/gatewayadmindev",
+            "cluster": "ecs-custom-apps-pam-dev",
+            "service": "gatewayadmindev-service"
+        },
+        {
+            "id": "agency-gateway-api",
+            "name": "Agency Gateway API (pammanagement)",
+            "logGroup": "custom-apps-pam-cloudwatch-dev",
+            "logStreamPrefix": "ecs/pammanagementdev",
+            "cluster": "ecs-custom-apps-pam-dev",
+            "service": "pammanagementdev-service"
+        },
+        {
+            "id": "gateway-worker",
+            "name": "Agency Gateway Worker (gateway-worker)",
+            "logGroup": "custom-apps-pam-external-cloudwatch-nonprod",
+            "logStreamPrefix": "ecs/gatewayapidev-worker",
+            "cluster": "ecs-custom-apps-pam-external-dev",
+            "service": "gatewayapidev-worker-service"
+        },
+        {
+            "id": "rabbitmq",
+            "name": "RabbitMQ Broker",
+            "logGroup": "/aws/amazonmq/broker/b-be411d2c-684d-4f18-86db-626eb59af1a2/general",
+            "logStreamPrefix": "rabbit@localhost_general.log",
+            "isScheduledTask": true
         }
     ]
 }

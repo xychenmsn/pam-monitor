@@ -49,10 +49,12 @@ export async function getDashboardStatus(env: 'qa' | 'dev' = 'qa'): Promise<AppD
     // Assuming mostly same cluster, but grouping just in case
     const servicesByCluster = new Map<string, string[]>();
     apps.forEach(app => {
-        if (!servicesByCluster.has(app.cluster)) {
-            servicesByCluster.set(app.cluster, []);
+        if (app.cluster && app.service) {
+            if (!servicesByCluster.has(app.cluster)) {
+                servicesByCluster.set(app.cluster, []);
+            }
+            servicesByCluster.get(app.cluster)!.push(app.service);
         }
-        servicesByCluster.get(app.cluster)!.push(app.service);
     });
 
     const ecsStatusMap = new Map<string, any>();
