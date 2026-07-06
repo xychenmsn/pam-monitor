@@ -128,7 +128,7 @@ export function useSimpleLogStream() {
     }, [])
 
     // Load logs for an app - SIMPLE: get latest stream, load all logs, done (no polling)
-    const loadLogs = useCallback(async (appName: string, env: 'qa' | 'dev') => {
+    const loadLogs = useCallback(async (appName: string, env: 'qa' | 'dev' | 'prod') => {
         if (!mountedRef.current) return
 
         stopPolling()

@@ -1,12 +1,16 @@
-import { ChevronRight, Loader2 } from 'lucide-react'
+import { ChevronRight, Database, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ScrollArea } from './ui/scroll-area'
 import type { App } from '@/lib/cloudwatch'
+import type { DatabaseConfig } from '@/lib/db'
 
 interface SidebarProps {
   apps: App[]
   selectedApp: string
   onAppSelect: (app: string) => void
+  databases: DatabaseConfig[]
+  selectedDb: string
+  onDbSelect: (dbId: string) => void
   collapsed: boolean
   loading: boolean
 }
@@ -15,6 +19,9 @@ export default function Sidebar({
   apps,
   selectedApp,
   onAppSelect,
+  databases = [],
+  selectedDb = '',
+  onDbSelect,
   collapsed,
   loading,
 }: SidebarProps) {
@@ -43,7 +50,7 @@ export default function Sidebar({
                 onClick={() => onAppSelect(app.name)}
                 className={cn(
                   'flex w-full items-center text-left gap-2 rounded-md px-2 py-1.5 text-sm font-medium hover:bg-accent hover:text-accent-foreground',
-                  selectedApp === app.name
+                  selectedApp === app.name && !selectedDb
                     ? 'bg-accent text-accent-foreground'
                     : 'text-muted-foreground',
                   collapsed && 'justify-center px-2'
@@ -53,7 +60,7 @@ export default function Sidebar({
                 <ChevronRight
                   className={cn(
                     'h-4 w-4 shrink-0',
-                    selectedApp === app.name ? 'opacity-100' : 'opacity-0'
+                    selectedApp === app.name && !selectedDb ? 'opacity-100' : 'opacity-0'
                   )}
                 />
                 {!collapsed && <span>{app.displayName}</span>}
@@ -65,6 +72,38 @@ export default function Sidebar({
             <div className="px-2 py-1 text-sm text-muted-foreground">
               {!collapsed ? 'No apps found' : ''}
             </div>
+          )}
+
+          {/* DATABASES SECTION */}
+          {!loading && databases.length > 0 && (
+            <>
+              <div className="mt-6 mb-2 px-2 py-1 text-xs font-semibold uppercase text-muted-foreground tracking-wider">
+                {!collapsed ? 'Databases' : ''}
+              </div>
+
+              {databases.map((db) => (
+                <button
+                  key={db.id}
+                  onClick={() => onDbSelect(db.id)}
+                  className={cn(
+                    'flex w-full items-center text-left gap-2 rounded-md px-2 py-1.5 text-sm font-medium hover:bg-accent hover:text-accent-foreground',
+                    selectedDb === db.id
+                      ? 'bg-accent text-accent-foreground'
+                      : 'text-muted-foreground',
+                    collapsed && 'justify-center px-2'
+                  )}
+                  title={collapsed ? db.name : undefined}
+                >
+                  <Database
+                    className={cn(
+                      'h-4 w-4 shrink-0',
+                      selectedDb === db.id ? 'text-primary' : 'text-muted-foreground'
+                    )}
+                  />
+                  {!collapsed && <span>{db.name}</span>}
+                </button>
+              ))}
+            </>
           )}
         </div>
       </ScrollArea>

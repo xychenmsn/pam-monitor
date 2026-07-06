@@ -5,10 +5,13 @@ import { triggerLogin } from '../lib/cloudwatch'
 
 interface RobustAuthDialogProps {
     isOpen: boolean
+    environment: 'qa' | 'dev' | 'prod'
     onRetry: () => Promise<boolean> // Returns true if auth succeeded
+    onClose?: () => void
+    isManual?: boolean
 }
 
-export default function RobustAuthDialog({ isOpen, onRetry }: RobustAuthDialogProps) {
+export default function RobustAuthDialog({ isOpen, environment, onRetry, onClose, isManual }: RobustAuthDialogProps) {
     const [retryCount, setRetryCount] = useState(0)
     const [countdown, setCountdown] = useState(30)
     const [isRetrying, setIsRetrying] = useState(false)
@@ -42,7 +45,8 @@ export default function RobustAuthDialog({ isOpen, onRetry }: RobustAuthDialogPr
             try {
                 const success = await onRetry()
                 if (success) {
-                    // Auth succeeded, dialog will close via parent
+                    // Auth succeeded, dialog will close via parent/onClose
+                    if (onClose) onClose()
                     return
                 }
                 setRetryCount(prev => prev + 1)
@@ -77,14 +81,14 @@ export default function RobustAuthDialog({ isOpen, onRetry }: RobustAuthDialogPr
             if (intervalRef.current) clearInterval(intervalRef.current)
             if (countdownRef.current) clearInterval(countdownRef.current)
         }
-    }, [isOpen, onRetry])
+    }, [isOpen, onRetry, onClose])
 
     const handleManualRetry = async () => {
         setIsRetrying(true)
         setLastError(null)
         try {
             // 1. Trigger the login script (MFA)
-            await triggerLogin()
+            await triggerLogin(environment)
 
             // Give user a moment to see the push notification/confirm
             // The process might return before they click.
@@ -92,7 +96,9 @@ export default function RobustAuthDialog({ isOpen, onRetry }: RobustAuthDialogPr
 
             // 2. Check if it worked
             const success = await onRetry()
-            if (!success) {
+            if (success) {
+                if (onClose) onClose()
+            } else {
                 setRetryCount(prev => prev + 1)
                 setLastError('Credentials still expired. Ensure you confirmed the push notification on your phone, then try again.')
             }
@@ -109,20 +115,27 @@ export default function RobustAuthDialog({ isOpen, onRetry }: RobustAuthDialogPr
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
-            <div className="mx-4 max-w-lg rounded-lg border border-destructive/50 bg-background p-6 shadow-lg">
+            <div className="mx-4 max-w-lg rounded-lg border border-primary/20 bg-background p-6 shadow-lg">
                 <div className="flex items-start gap-4">
-                    <div className="rounded-full bg-destructive/10 p-2">
-                        <AlertCircle className="h-6 w-6 text-destructive" />
+                    <div className="rounded-full bg-primary/10 p-2">
+                        <AlertCircle className="h-6 w-6 text-primary" />
                     </div>
                     <div className="flex-1">
-                        <h2 className="text-lg font-semibold">AWS Credentials Expired</h2>
+                        <h2 className="text-lg font-semibold">
+                            {isManual ? 'AWS Reconnect' : 'AWS Credentials Expired'}
+                        </h2>
                         <p className="mt-2 text-sm text-muted-foreground">
-                            Your AWS credentials have expired. Please run the following command in your terminal:
+                            {isManual 
+                                ? 'Verify or refresh your AWS credentials. Please run the following command in your terminal:'
+                                : 'Your AWS credentials have expired. Please run the following command in your terminal:'
+                            }
                         </p>
                         <div className="mt-3 rounded-md bg-muted p-3 font-mono text-sm">
                             <div className="flex items-center gap-2">
                                 <Terminal className="h-4 w-4 text-muted-foreground" />
-                                <code className="text-green-400">peacock security</code>
+                                <code className="text-green-400">
+                                    {environment === 'prod' ? 'awslogin_prod' : 'awslogin_nonprod'}
+                                </code>
                             </div>
                         </div>
 
@@ -159,6 +172,15 @@ export default function RobustAuthDialog({ isOpen, onRetry }: RobustAuthDialogPr
                     </div>
                 </div>
                 <div className="mt-6 flex justify-end gap-2">
+                    {onClose && (
+                        <Button
+                            variant="ghost"
+                            onClick={onClose}
+                            disabled={isRetrying}
+                        >
+                            Cancel
+                        </Button>
+                    )}
                     <Button
                         onClick={handleManualRetry}
                         disabled={isRetrying}
@@ -172,7 +194,7 @@ export default function RobustAuthDialog({ isOpen, onRetry }: RobustAuthDialogPr
                         ) : (
                             <>
                                 <RefreshCw className="h-4 w-4" />
-                                Retry Now
+                                {isManual ? 'Reconnect Now' : 'Retry Now'}
                             </>
                         )}
                     </Button>

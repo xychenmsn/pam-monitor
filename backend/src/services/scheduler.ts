@@ -11,15 +11,21 @@ const __dirname = path.dirname(__filename);
 const configPath = path.join(__dirname, '../config/applications.json');
 const allApps = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 
-let cwClient: CloudWatchEventsClient | null = null;
+const cwClients: Record<string, CloudWatchEventsClient> = {};
 
-async function getCWClient(forceRefetch: boolean = false): Promise<CloudWatchEventsClient> {
-    if (cwClient && !forceRefetch) return cwClient;
-    cwClient = new CloudWatchEventsClient({
+async function getCWClient(env: 'qa' | 'dev' | 'prod', forceRefetch: boolean = false): Promise<CloudWatchEventsClient> {
+    if (cwClients[env] && !forceRefetch) return cwClients[env];
+    cwClients[env] = new CloudWatchEventsClient({
         region: 'us-east-1',
-        credentials: getCredentialProvider(forceRefetch)
+        credentials: getCredentialProvider(env, forceRefetch)
     });
-    return cwClient;
+    return cwClients[env];
+}
+
+function invalidateSchedulerClients() {
+    for (const key of Object.keys(cwClients)) {
+        delete cwClients[key];
+    }
 }
 
 export interface SchedulerRuleInfo {
@@ -42,10 +48,10 @@ export interface SchedulerRuleInfo {
 /**
  * Get details of a CloudWatch Events scheduler rule + its ECS targets
  */
-export async function getSchedulerRule(ruleName: string, _env: string): Promise<SchedulerRuleInfo> {
+export async function getSchedulerRule(ruleName: string, env: 'qa' | 'dev' | 'prod'): Promise<SchedulerRuleInfo> {
     return withAwsRecovery(
         async (forceRefetch) => {
-            const cw = await getCWClient(forceRefetch);
+            const cw = await getCWClient(env, forceRefetch);
 
             const [ruleRes, targetsRes] = await Promise.all([
                 cw.send(new DescribeRuleCommand({ Name: ruleName })),
@@ -71,30 +77,30 @@ export async function getSchedulerRule(ruleName: string, _env: string): Promise<
                 targets,
             };
         },
-        () => { cwClient = null; }
+        () => { invalidateSchedulerClients(); }
     );
 }
 
 /**
  * Enable a CloudWatch Events rule (resume scheduled runs)
  */
-export async function enableSchedulerRule(ruleName: string): Promise<void> {
+export async function enableSchedulerRule(ruleName: string, env: 'qa' | 'dev' | 'prod'): Promise<void> {
     await withAwsRecovery(
         async (forceRefetch) => {
-            const cw = await getCWClient(forceRefetch);
+            const cw = await getCWClient(env, forceRefetch);
             await cw.send(new EnableRuleCommand({ Name: ruleName }));
         },
-        () => { cwClient = null; }
+        () => { invalidateSchedulerClients(); }
     );
 }
 
-export async function disableSchedulerRule(ruleName: string): Promise<void> {
+export async function disableSchedulerRule(ruleName: string, env: 'qa' | 'dev' | 'prod'): Promise<void> {
     await withAwsRecovery(
         async (forceRefetch) => {
-            const cw = await getCWClient(forceRefetch);
+            const cw = await getCWClient(env, forceRefetch);
             await cw.send(new DisableRuleCommand({ Name: ruleName }));
         },
-        () => { cwClient = null; }
+        () => { invalidateSchedulerClients(); }
     );
 }
 
@@ -104,11 +110,11 @@ export async function disableSchedulerRule(ruleName: string): Promise<void> {
 export async function updateSchedulerRule(
     ruleName: string,
     scheduleExpression: string,
-    _env: string
+    env: 'qa' | 'dev' | 'prod'
 ): Promise<{ success: boolean; ruleArn?: string }> {
     return withAwsRecovery(
         async (forceRefetch) => {
-            const cw = await getCWClient(forceRefetch);
+            const cw = await getCWClient(env, forceRefetch);
 
             // First get current rule to preserve all other settings
             const currentRule = await cw.send(new DescribeRuleCommand({ Name: ruleName }));
@@ -122,7 +128,7 @@ export async function updateSchedulerRule(
 
             return { success: true, ruleArn: res.RuleArn };
         },
-        () => { cwClient = null; }
+        () => { invalidateSchedulerClients(); }
     );
 }
 
@@ -132,7 +138,7 @@ export async function updateSchedulerRule(
  */
 export async function triggerScheduledTask(
     appName: string,
-    env: 'qa' | 'dev'
+    env: 'qa' | 'dev' | 'prod'
 ): Promise<{ success: boolean; taskArn?: string; message: string }> {
     const apps = allApps[env] || [];
     const appConfig = apps.find((a: any) => a.name === appName || a.id === appName);
@@ -150,7 +156,7 @@ export async function triggerScheduledTask(
         throw new Error(`No schedulerRule configured for ${appName}`);
     }
 
-    return await withAutoRetry(async () => {
+    return await withAutoRetry(env, async () => {
         // Get network config from the CloudWatch target
         const rule = await getSchedulerRule(ruleName, env);
         const target = rule.targets[0];
@@ -159,7 +165,7 @@ export async function triggerScheduledTask(
             throw new Error(`No ECS target found for rule ${ruleName}`);
         }
 
-        const ecs = await getECSClient();
+        const ecs = await getECSClient(env);
 
         const res = await ecs.send(new RunTaskCommand({
             cluster: appConfig.cluster,
@@ -196,7 +202,7 @@ export async function triggerScheduledTask(
  */
 export async function getScheduledTaskRuns(
     appName: string,
-    env: 'qa' | 'dev',
+    env: 'qa' | 'dev' | 'prod',
     limit = 5
 ): Promise<{
     taskArn: string;
@@ -210,7 +216,7 @@ export async function getScheduledTaskRuns(
     const appConfig = apps.find((a: any) => a.name === appName || a.id === appName);
     if (!appConfig || !appConfig.isScheduledTask) return [];
 
-    const ecs = await getECSClient();
+    const ecs = await getECSClient(env);
 
     // Get recent STOPPED tasks (finished runs)
     const stopped = await ecs.send(new ListTasksCommand({

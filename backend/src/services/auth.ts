@@ -66,10 +66,28 @@ export function logCredentialStats() {
 /**
  * Creates a credential provider that can bypass the SDK's internal cache
  */
-export function getCredentialProvider(forceRefetch: boolean = false) {
-    // We pass ignoreCache: true when we know we just had an auth failure
-    // and want to ensure we read the new file from disk.
+export function getCredentialProvider(env: 'qa' | 'dev' | 'prod', forceRefetch: boolean = false) {
+    const profile = env === 'prod' ? 'prod' : 'nonprod';
+
+    // We check if the profile exists in ~/.aws/credentials. If not, fallback to 'saml'.
+    let selectedProfile = profile;
+    try {
+        const credPath = path.join(process.env.HOME || '', '.aws/credentials');
+        if (fs.existsSync(credPath)) {
+            const content = fs.readFileSync(credPath, 'utf-8');
+            const hasProfile = content.includes(`[${profile}]`);
+            if (!hasProfile) {
+                console.warn(`[AUTH] Profile [${profile}] not found in ~/.aws/credentials, falling back to [saml]`);
+                selectedProfile = 'saml';
+            }
+        }
+    } catch (e) {
+        console.warn('[AUTH] Error checking credentials file, falling back to default/saml profile', e);
+        selectedProfile = 'saml';
+    }
+
     return fromNodeProviderChain({
+        profile: selectedProfile,
         // @ts-ignore - The type definition might not include this but the implementation (fromIni) does
         ignoreCache: forceRefetch
     });
@@ -113,29 +131,65 @@ export async function withAwsRecovery<T>(
 /**
  * Triggers the local AWS login script/alias
  */
-export async function triggerAwsLogin(): Promise<boolean> {
-    console.log('[AUTH] Triggering AWS login via shell command "awslogin"...');
-    try {
-        // Use an interactive login shell to ensure aliases are loaded.
-        // On Mac this is typically zsh.
-        const shell = process.env.SHELL || '/bin/zsh';
+export async function triggerAwsLogin(env: 'qa' | 'dev' | 'prod'): Promise<boolean> {
+    const isProd = env === 'prod';
+    const primaryCmd = isProd ? 'awslogin_prod' : 'awslogin_nonprod';
+    const secondaryCmd = isProd ? 'awslogin_nonprod' : 'awslogin_prod';
+    
+    const shell = process.env.SHELL || '/bin/zsh';
+    let primarySuccess = false;
 
-        // We don't want to wait forever if it's truly blocking without a timeout,
-        // but the user says it waits for MFA on the phone.
-        // We'll give it a generous timeout of 60 seconds.
-        const { stdout, stderr } = await execAsync(`${shell} -i -c "awslogin"`, {
+    console.log(`[AUTH] [1/2] Triggering primary AWS login via "${primaryCmd}"...`);
+    try {
+        const { stdout, stderr } = await execAsync(`${shell} -i -c "${primaryCmd}"`, {
             env: { ...process.env, TERM: 'xterm' },
             timeout: 60000
         });
-
-        if (stdout) console.log('[AUTH] awslogin stdout:', stdout);
-        if (stderr) console.warn('[AUTH] awslogin stderr:', stderr);
-
-        return true;
+        if (stdout) console.log(`[AUTH] ${primaryCmd} stdout:`, stdout);
+        if (stderr) console.warn(`[AUTH] ${primaryCmd} stderr:`, stderr);
+        primarySuccess = true;
+        console.log(`[AUTH] Primary AWS login via "${primaryCmd}" completed.`);
     } catch (e: any) {
-        // Non-zero exit code might just mean it was already logged in or 
-        // MFA timed out, but we should log it.
-        console.warn(`[AUTH] awslogin execution finished with notice: ${e.message}`);
-        return true; // Return true anyway as it might have succeeded in refreshing
+        console.warn(`[AUTH] Primary AWS login via "${primaryCmd}" notice: ${e.message}`);
+        // Fallback for nonprod/dev
+        if (!isProd) {
+            try {
+                console.log('[AUTH] Falling back to generic "awslogin" for primary...');
+                await execAsync(`${shell} -i -c "awslogin"`, {
+                    env: { ...process.env, TERM: 'xterm' },
+                    timeout: 60000
+                });
+                primarySuccess = true;
+            } catch (fallbackError: any) {
+                console.warn(`[AUTH] Primary fallback awslogin notice: ${fallbackError.message}`);
+            }
+        }
     }
+
+    console.log(`[AUTH] [2/2] Triggering secondary AWS login via "${secondaryCmd}"...`);
+    try {
+        const { stdout, stderr } = await execAsync(`${shell} -i -c "${secondaryCmd}"`, {
+            env: { ...process.env, TERM: 'xterm' },
+            timeout: 60000
+        });
+        if (stdout) console.log(`[AUTH] ${secondaryCmd} stdout:`, stdout);
+        if (stderr) console.warn(`[AUTH] ${secondaryCmd} stderr:`, stderr);
+        console.log(`[AUTH] Secondary AWS login via "${secondaryCmd}" completed.`);
+    } catch (e: any) {
+        console.warn(`[AUTH] Secondary AWS login via "${secondaryCmd}" notice: ${e.message}`);
+        // Fallback for nonprod/dev
+        if (isProd) { // secondary is nonprod
+            try {
+                console.log('[AUTH] Falling back to generic "awslogin" for secondary...');
+                await execAsync(`${shell} -i -c "awslogin"`, {
+                    env: { ...process.env, TERM: 'xterm' },
+                    timeout: 60000
+                });
+            } catch (fallbackError: any) {
+                console.warn(`[AUTH] Secondary fallback awslogin notice: ${fallbackError.message}`);
+            }
+        }
+    }
+
+    return primarySuccess;
 }

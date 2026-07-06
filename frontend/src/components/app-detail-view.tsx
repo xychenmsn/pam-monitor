@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 interface AppDetailViewProps {
     appName: string;
     initialStream?: string;
-    environment: 'qa' | 'dev';
+    environment: 'qa' | 'dev' | 'prod';
     activeTab?: string;
     onBack: () => void;
     isAuthError?: boolean;

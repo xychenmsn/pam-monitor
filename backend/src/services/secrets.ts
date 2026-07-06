@@ -7,7 +7,7 @@ const REGION = 'us-east-1';
 const ENV_MAP: Record<string, string> = {
     qa: 'qa',
     dev: 'dev',
-    production: 'production',
+    prod: 'production',
 };
 
 // Map app IDs to their secret name segment
@@ -18,6 +18,8 @@ const APP_SECRET_NAMES: Record<string, string> = {
     'tad': 'tad',
     'rmx': 'rmx',
     'remora': 'pamadmin',
+    'ag-admin': 'gatewayadmin',
+    'agency-gateway-api': 'gatewayapi',
 };
 
 // Apps with a custom full-path template (env is substituted for {env})
@@ -26,19 +28,21 @@ const APP_SECRET_CUSTOM_PATHS: Record<string, string> = {
     'psi': '/pam/psi/{env}',
 };
 
-let smClient: SecretsManagerClient | null = null;
+const smClients: Record<string, SecretsManagerClient> = {};
 
-function getClient(forceRefetch: boolean = false): SecretsManagerClient {
-    if (smClient && !forceRefetch) return smClient;
-    smClient = new SecretsManagerClient({
+function getClient(env: 'qa' | 'dev' | 'prod', forceRefetch: boolean = false): SecretsManagerClient {
+    if (smClients[env] && !forceRefetch) return smClients[env];
+    smClients[env] = new SecretsManagerClient({
         region: REGION,
-        credentials: getCredentialProvider(forceRefetch),
+        credentials: getCredentialProvider(env, forceRefetch),
     });
-    return smClient;
+    return smClients[env];
 }
 
 export function invalidateClient() {
-    smClient = null;
+    for (const key of Object.keys(smClients)) {
+        delete smClients[key];
+    }
 }
 
 export interface SecretEntry {
@@ -58,7 +62,7 @@ export interface SecretsResult {
  */
 export async function getAppSecrets(
     appId: string,
-    env: 'qa' | 'dev'
+    env: 'qa' | 'dev' | 'prod'
 ): Promise<SecretsResult> {
     const envSegment = ENV_MAP[env] ?? env;
     // Check for a custom full-path override first (e.g. PSI uses /pam/psi/{env})
@@ -69,7 +73,7 @@ export async function getAppSecrets(
 
     return withAwsRecovery(
         async (forceRefetch) => {
-            const client = getClient(forceRefetch);
+            const client = getClient(env, forceRefetch);
             const command = new GetSecretValueCommand({ SecretId: secretId });
             const response = await client.send(command);
 

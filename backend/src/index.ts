@@ -7,11 +7,18 @@ import { getAppSecrets } from './services/secrets.js';
 import { triggerAwsLogin } from './services/auth.js';
 import { getSchedulerRule, updateSchedulerRule, triggerScheduledTask, enableSchedulerRule, disableSchedulerRule } from './services/scheduler.js';
 import { listPsiPayloads, getPsiPayloadContent } from './services/s3.js';
+import * as dbService from './services/db.js';
 
 const app = express();
 const port = process.env.PORT || 31191;
 const SESSION_ID = Math.random().toString(36).substring(7);
 console.log(`[INIT] Server Session ID: ${SESSION_ID}`);
+
+function parseEnv(queryEnv: any): 'qa' | 'dev' | 'prod' {
+  if (queryEnv === 'prod') return 'prod';
+  if (queryEnv === 'dev') return 'dev';
+  return 'qa';
+}
 
 // Middleware
 app.use(cors());
@@ -62,7 +69,8 @@ app.get('/api/auth/aws/status', async (req, res) => {
  */
 app.post('/api/auth/aws/login', async (req, res) => {
   try {
-    const success = await triggerAwsLogin();
+    const env = parseEnv(req.body.env || req.query.env);
+    const success = await triggerAwsLogin(env);
     res.json({ success });
   } catch (error: any) {
     console.error('Error triggering AWS login:', error);
@@ -76,7 +84,7 @@ app.post('/api/auth/aws/login', async (req, res) => {
  */
 app.get('/api/apps', async (req, res) => {
   try {
-    const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+    const env = parseEnv(req.query.env);
     const apps = await cloudwatch.listApps(env);
     res.json(apps);
   } catch (error: any) {
@@ -99,7 +107,7 @@ app.get('/api/apps', async (req, res) => {
  */
 app.get('/api/dashboard/status', async (req, res) => {
   try {
-    const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+    const env = parseEnv(req.query.env);
     const status = await getDashboardStatus(env);
     res.json(status);
   } catch (error: any) {
@@ -117,7 +125,7 @@ app.get('/api/dashboard/status', async (req, res) => {
 });
 
 app.get('/api/apps/:appName/details', async (req, res) => {
-  const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+  const env = parseEnv(req.query.env);
   const appName = req.params.appName;
   try {
     const result = await getAppDetails(appName, env);
@@ -137,7 +145,7 @@ app.get('/api/apps/:appName/details', async (req, res) => {
  * Fetch secrets from AWS Secrets Manager for the given app
  */
 app.get('/api/apps/:appName/secrets', async (req, res) => {
-  const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+  const env = parseEnv(req.query.env);
   const appName = req.params.appName;
   try {
     const result = await getAppSecrets(appName, env);
@@ -162,7 +170,7 @@ app.get('/api/apps/:appName/secrets', async (req, res) => {
  * Fetch PSI payloads from S3
  */
 app.get('/api/apps/:appName/s3/payloads', async (req, res) => {
-  const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+  const env = parseEnv(req.query.env);
   const appName = req.params.appName;
 
   if (!appName.toLowerCase().includes('psi')) {
@@ -216,7 +224,7 @@ app.get('/api/apps/:appName/s3/payload-content', async (req, res) => {
 });
 
 app.post('/api/apps/:appName/restart', async (req, res) => {
-  const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+  const env = parseEnv(req.query.env);
   const appName = req.params.appName;
   try {
     const success = await restartService(appName, env);
@@ -236,7 +244,7 @@ app.post('/api/apps/:appName/restart', async (req, res) => {
  * Get CloudWatch Events rule info and targets for a scheduled task
  */
 app.get('/api/scheduler/:ruleName', async (req, res) => {
-  const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+  const env = parseEnv(req.query.env);
   const { ruleName } = req.params;
   try {
     const rule = await getSchedulerRule(ruleName, env);
@@ -253,7 +261,7 @@ app.get('/api/scheduler/:ruleName', async (req, res) => {
  * Body: { scheduleExpression: string }
  */
 app.put('/api/scheduler/:ruleName', async (req, res) => {
-  const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+  const env = parseEnv(req.query.env);
   const { ruleName } = req.params;
   const { scheduleExpression } = req.body;
   if (!scheduleExpression || typeof scheduleExpression !== 'string') {
@@ -273,9 +281,10 @@ app.put('/api/scheduler/:ruleName', async (req, res) => {
  * Enable a CloudWatch Events rule (resume scheduled runs)
  */
 app.post('/api/scheduler/:ruleName/enable', async (req, res) => {
+  const env = parseEnv(req.query.env);
   const { ruleName } = req.params;
   try {
-    await enableSchedulerRule(ruleName);
+    await enableSchedulerRule(ruleName, env);
     res.json({ success: true, state: 'ENABLED' });
   } catch (err: any) {
     console.error('Error enabling scheduler rule:', err);
@@ -288,9 +297,10 @@ app.post('/api/scheduler/:ruleName/enable', async (req, res) => {
  * Disable a CloudWatch Events rule (pause scheduled runs)
  */
 app.post('/api/scheduler/:ruleName/disable', async (req, res) => {
+  const env = parseEnv(req.query.env);
   const { ruleName } = req.params;
   try {
-    await disableSchedulerRule(ruleName);
+    await disableSchedulerRule(ruleName, env);
     res.json({ success: true, state: 'DISABLED' });
   } catch (err: any) {
     console.error('Error disabling scheduler rule:', err);
@@ -303,7 +313,7 @@ app.post('/api/scheduler/:ruleName/disable', async (req, res) => {
  * Manually trigger a scheduled task (Run Now), bypassing the schedule
  */
 app.post('/api/apps/:appName/trigger', async (req, res) => {
-  const env = (req.query.env as string) === 'dev' ? 'dev' : 'qa';
+  const env = parseEnv(req.query.env);
   const { appName } = req.params;
   try {
     const result = await triggerScheduledTask(appName, env);
@@ -324,12 +334,13 @@ app.post('/api/apps/:appName/trigger', async (req, res) => {
  */
 app.get('/api/streams', async (req, res) => {
   try {
-    const { app, env = 'qa' } = req.query;
+    const { app } = req.query;
+    const env = parseEnv(req.query.env);
     if (!app || typeof app !== 'string') {
       return res.status(400).json({ error: 'app parameter is required' });
     }
     const streams = await cloudwatch.getStreamList(
-      env === 'dev' ? 'dev' : 'qa',
+      env,
       app
     );
     res.json({ streams });
@@ -352,12 +363,13 @@ app.get('/api/streams', async (req, res) => {
  */
 app.get('/api/logs/latest', async (req, res) => {
   try {
-    const { app, env = 'qa', limit = '500', startTime } = req.query;
+    const { app, limit = '500', startTime } = req.query;
+    const env = parseEnv(req.query.env);
     if (!app || typeof app !== 'string') {
       return res.status(400).json({ error: 'app parameter is required' });
     }
     const logs = await cloudwatch.fetchLatestLogs(
-      env === 'dev' ? 'dev' : 'qa',
+      env,
       app,
       Number(limit),
       startTime ? Number(startTime) : undefined
@@ -383,12 +395,13 @@ app.get('/api/logs/latest', async (req, res) => {
  */
 app.post('/api/logs/stream', async (req, res) => {
   try {
-    const { streamName, env = 'qa', startTime, limit } = req.body;
+    const { streamName, startTime, limit } = req.body;
+    const env = parseEnv(req.body.env);
     if (!streamName || typeof streamName !== 'string') {
       return res.status(400).json({ error: 'streamName parameter is required' });
     }
     const logs = await cloudwatch.fetchLogsFromStream(
-      env === 'dev' ? 'dev' : 'qa',
+      env,
       streamName,
       startTime ? Number(startTime) : undefined,
       limit ? Number(limit) : undefined
@@ -414,12 +427,13 @@ app.post('/api/logs/stream', async (req, res) => {
  */
 app.post('/api/logs/poll', async (req, res) => {
   try {
-    const { env = 'qa', streams } = req.body;
+    const { streams } = req.body;
+    const env = parseEnv(req.body.env);
     if (!Array.isArray(streams)) {
       return res.status(400).json({ error: 'streams must be an array' });
     }
     const logs = await cloudwatch.fetchNewLogsFromStreams(
-      env === 'dev' ? 'dev' : 'qa',
+      env,
       streams
     );
     res.json({ logs });
@@ -445,11 +459,12 @@ app.post('/api/logs/poll', async (req, res) => {
  */
 app.get('/api/logs/streams', async (req, res) => {
   try {
-    const { app, env = 'qa' } = req.query;
+    const { app } = req.query;
+    const env = parseEnv(req.query.env);
     if (!app || typeof app !== 'string') {
       return res.status(400).json({ error: 'App name required' });
     }
-    const streams = await cloudwatch.getStreamList(env as 'qa' | 'dev', app);
+    const streams = await cloudwatch.getStreamList(env, app);
     res.json(streams);
   } catch (error: any) {
     const isAuthError = error.name === 'ExpiredTokenException' ||
@@ -470,7 +485,8 @@ app.get('/api/logs/streams', async (req, res) => {
  */
 app.post('/api/logs/stream/events', async (req, res) => {
   try {
-    const { streamName, env = 'qa', limit = 1000, startFromHead = false, nextToken } = req.body;
+    const { streamName, limit = 1000, startFromHead = false, nextToken } = req.body;
+    const env = parseEnv(req.body.env);
 
     // Debug logging
     console.log(`[POST /stream/events] app=${streamName} startFromHead=${startFromHead} (${typeof startFromHead}) nextToken=${nextToken ? 'YES' : 'NO'}`);
@@ -483,7 +499,7 @@ app.post('/api/logs/stream/events', async (req, res) => {
     const isStartFromHead = startFromHead === true || startFromHead === 'true';
 
     const result = await cloudwatch.getLogEvents(
-      env === 'dev' ? 'dev' : 'qa',
+      env,
       streamName,
       Number(limit),
       isStartFromHead,
@@ -510,7 +526,8 @@ app.post('/api/logs/stream/events', async (req, res) => {
  * Server-Sent Events (SSE) endpoint for Live Tail
  */
 app.get('/api/logs/live', async (req, res) => {
-  const { app, env = 'qa' } = req.query;
+  const { app } = req.query;
+  const env = parseEnv(req.query.env);
 
   if (!app || typeof app !== 'string') {
     return res.status(400).json({ error: 'App name required' });
@@ -527,7 +544,7 @@ app.get('/api/logs/live', async (req, res) => {
   res.write(`data: ${JSON.stringify({ type: 'connected', message: 'Connected to Live Tail...' })}\n\n`);
 
   const cleanup = await cloudwatch.startLiveTail(
-    env === 'dev' ? 'dev' : 'qa',
+    env,
     app,
     (logs) => {
       // Send logs to client
@@ -563,6 +580,74 @@ app.get('/api/logs/live', async (req, res) => {
     console.log('Client disconnected, stopping Live Tail');
     cleanup();
   });
+});
+
+/**
+ * GET /api/databases
+ * Get configured databases for current environment
+ */
+app.get('/api/databases', async (req, res) => {
+  try {
+    const env = parseEnv(req.query.env);
+    const databases = await dbService.listDatabases(env);
+    res.json(databases);
+  } catch (error: any) {
+    console.error('Error listing databases:', error);
+    res.status(500).json({ error: 'Failed to list databases', message: error.message });
+  }
+});
+
+/**
+ * GET /api/databases/:dbId/tables
+ * List tables inside a database
+ */
+app.get('/api/databases/:dbId/tables', async (req, res) => {
+  try {
+    const env = parseEnv(req.query.env);
+    const { dbId } = req.params;
+    const tables = await dbService.listTables(env, dbId);
+    res.json(tables);
+  } catch (error: any) {
+    console.error('Error listing tables:', error);
+    res.status(500).json({ error: 'Failed to list tables', message: error.message });
+  }
+});
+
+/**
+ * GET /api/databases/:dbId/tables/:tableName/data
+ * Paginate rows and get column schemas for a table
+ */
+app.get('/api/databases/:dbId/tables/:tableName/data', async (req, res) => {
+  try {
+    const env = parseEnv(req.query.env);
+    const { dbId, tableName } = req.params;
+    const { limit = '50', offset = '0' } = req.query;
+    const data = await dbService.getTableData(env, dbId, tableName, Number(limit), Number(offset));
+    res.json(data);
+  } catch (error: any) {
+    console.error('Error fetching table data:', error);
+    res.status(500).json({ error: 'Failed to fetch table data', message: error.message });
+  }
+});
+
+/**
+ * POST /api/databases/:dbId/query
+ * Execute custom read-only SQL queries
+ */
+app.post('/api/databases/:dbId/query', async (req, res) => {
+  try {
+    const env = parseEnv(req.query.env);
+    const { dbId } = req.params;
+    const { query } = req.body;
+    if (!query || typeof query !== 'string') {
+      return res.status(400).json({ error: 'SQL query string is required' });
+    }
+    const result = await dbService.executeCustomQuery(env, dbId, query);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error executing query:', error);
+    res.status(500).json({ error: 'Query execution failed', message: error.message });
+  }
 });
 
 // Start server

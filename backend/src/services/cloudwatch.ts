@@ -5,6 +5,7 @@ import { withAwsRecovery, getCredentialProvider } from './auth.js';
 export const LOG_GROUPS = {
   qa: 'custom-apps-pam-cloudwatch-qa',
   dev: 'custom-apps-pam-cloudwatch-nonprod',
+  prod: 'custom-apps-pam-cloudwatch-prod',
 };
 
 export const APP_DISPLAY_NAMES: Record<string, string> = {
@@ -61,46 +62,51 @@ export const APP_PREFIXES = [
 
 const REGION = 'us-east-1';
 
-let cwClient: CloudWatchLogsClient | null = null;
-let ecsClient: ECSClient | null = null;
+const cwClients: Record<string, CloudWatchLogsClient> = {};
+const ecsClients: Record<string, ECSClient> = {};
 
-export async function getClient(forceRefetch: boolean = false): Promise<CloudWatchLogsClient> {
-  if (cwClient && !forceRefetch) return cwClient;
+export async function getClient(env: 'qa' | 'dev' | 'prod', forceRefetch: boolean = false): Promise<CloudWatchLogsClient> {
+  if (cwClients[env] && !forceRefetch) return cwClients[env];
 
-  cwClient = new CloudWatchLogsClient({
+  cwClients[env] = new CloudWatchLogsClient({
     region: REGION,
-    credentials: getCredentialProvider(forceRefetch),
+    credentials: getCredentialProvider(env, forceRefetch),
   });
-  return cwClient;
+  return cwClients[env];
 }
 
-export async function getECSClient(forceRefetch: boolean = false): Promise<ECSClient> {
-  if (ecsClient && !forceRefetch) return ecsClient;
+export async function getECSClient(env: 'qa' | 'dev' | 'prod', forceRefetch: boolean = false): Promise<ECSClient> {
+  if (ecsClients[env] && !forceRefetch) return ecsClients[env];
 
-  ecsClient = new ECSClient({
+  ecsClients[env] = new ECSClient({
     region: REGION,
-    credentials: getCredentialProvider(forceRefetch),
+    credentials: getCredentialProvider(env, forceRefetch),
   });
-  return ecsClient;
+  return ecsClients[env];
 }
 
 /**
  * Invalidate cached AWS clients to force fresh creation
  */
 export function invalidateClients() {
-  cwClient = null;
-  ecsClient = null;
+  for (const key of Object.keys(cwClients)) {
+    delete cwClients[key];
+  }
+  for (const key of Object.keys(ecsClients)) {
+    delete ecsClients[key];
+  }
 }
 
 /**
  * Wrapper that automatically retries with fresh credentials on auth errors
  */
 export async function withAutoRetry<T>(
+  env: 'qa' | 'dev' | 'prod',
   fn: (client: CloudWatchLogsClient, forceRefetch: boolean) => Promise<T>
 ): Promise<T> {
   return withAwsRecovery(
     async (forceRefetch) => {
-      const client = await getClient(forceRefetch);
+      const client = await getClient(env, forceRefetch);
       return await fn(client, forceRefetch);
     },
     () => {
@@ -125,7 +131,7 @@ const allApps = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 /**
  * Helper to get app configuration by name or ID
  */
-export function getAppConfig(env: 'qa' | 'dev', identifier: string) {
+export function getAppConfig(env: 'qa' | 'dev' | 'prod', identifier: string) {
   const apps = allApps[env] || [];
   return apps.find((a: any) => a.id === identifier || a.name === identifier);
 }
@@ -135,15 +141,16 @@ export function getAppConfig(env: 'qa' | 'dev', identifier: string) {
  */
 export async function checkAuth(): Promise<boolean> {
   try {
-    await withAutoRetry(async (client) => {
+    await withAutoRetry('qa', async (client: CloudWatchLogsClient) => {
+      await client.send(new DescribeLogGroupsCommand({ limit: 1 }));
+    });
+    await withAutoRetry('prod', async (client: CloudWatchLogsClient) => {
       await client.send(new DescribeLogGroupsCommand({ limit: 1 }));
     });
     return true;
   } catch (error) {
     console.error('Auth check failed:', error);
-    // On auth failure, insure the clients are cleared so next heartbeat checks again with fresh state
-    cwClient = null;
-    ecsClient = null;
+    invalidateClients();
     return false;
   }
 }
@@ -151,7 +158,7 @@ export async function checkAuth(): Promise<boolean> {
 /**
  * List all available apps for an environment
  */
-export async function listApps(env: 'qa' | 'dev' = 'qa') {
+export async function listApps(env: 'qa' | 'dev' | 'prod' = 'qa') {
   const appsConfig = allApps[env] || [];
 
   return appsConfig.map((app: any) => ({
@@ -166,16 +173,16 @@ export async function listApps(env: 'qa' | 'dev' = 'qa') {
  * Get the latest log stream for an app
  * Optimized to find the exact active stream by querying ECS directly.
  */
-export async function getStreamList(env: 'qa' | 'dev', appName: string): Promise<string[]> {
+export async function getStreamList(env: 'qa' | 'dev' | 'prod', appName: string): Promise<string[]> {
   const config = getAppConfig(env, appName);
   const logStreamPrefix = config?.logStreamPrefix || `ecs/${appName}`;
   const logGroupName = config?.logGroup || LOG_GROUPS[env];
 
-  return await withAutoRetry(async (client, forceRefetch) => {
+  return await withAutoRetry(env, async (client, forceRefetch) => {
     // 1. Ask ECS for running tasks to determine exact stream names
     if (config && !config.isScheduledTask && config.cluster && config.service) {
       try {
-        const ecs = await getECSClient(forceRefetch);
+        const ecs = await getECSClient(env, forceRefetch);
         const listCmd = new ListTasksCommand({
           cluster: config.cluster,
           serviceName: config.service,
@@ -253,7 +260,7 @@ export async function getStreamList(env: 'qa' | 'dev', appName: string): Promise
 /**
  * Helper to dynamically resolve the log group name for a given stream name
  */
-function getLogGroupNameForStream(env: 'qa' | 'dev', streamName: string): string {
+function getLogGroupNameForStream(env: 'qa' | 'dev' | 'prod', streamName: string): string {
   let logGroupName = LOG_GROUPS[env];
   const appsConfig = allApps[env] || [];
   const matchingApp = appsConfig.find((app: any) => 
@@ -270,13 +277,13 @@ function getLogGroupNameForStream(env: 'qa' | 'dev', streamName: string): string
  * Fetch logs from a specific stream with time range
  */
 export async function fetchLogsFromStream(
-  env: 'qa' | 'dev',
+  env: 'qa' | 'dev' | 'prod',
   streamName: string,
   startTime?: number,
   limit?: number
 ) {
   try {
-    return await withAutoRetry(async (client) => {
+    return await withAutoRetry(env, async (client) => {
       const logGroupName = getLogGroupNameForStream(env, streamName);
       const allEvents: { timestamp: number; stream: string; message: string }[] = [];
       let nextToken: string | undefined = undefined;
@@ -325,13 +332,13 @@ export async function fetchLogsFromStream(
  * Get logs using GetLogEventsCommand (better for polling/pagination)
  */
 export async function getLogEvents(
-  env: 'qa' | 'dev',
+  env: 'qa' | 'dev' | 'prod',
   streamName: string,
   limit: number = 1000,
   startFromHead: boolean = false,
   nextToken?: string
 ) {
-  return await withAutoRetry(async (client) => {
+  return await withAutoRetry(env, async (client) => {
     const logGroupName = getLogGroupNameForStream(env, streamName);
     const command = new GetLogEventsCommand({
       logGroupName,
@@ -360,14 +367,14 @@ export async function getLogEvents(
  * Fetch logs from specific streams with timestamp filter (efficient polling)
  */
 export async function fetchNewLogsFromStreams(
-  env: 'qa' | 'dev',
+  env: 'qa' | 'dev' | 'prod',
   streams: { streamName: string; startTime: number }[]
 ) {
   if (streams.length === 0) {
     return [];
   }
 
-  return await withAutoRetry(async (client) => {
+  return await withAutoRetry(env, async (client) => {
     const allEvents = [];
 
     for (const { streamName, startTime } of streams) {
@@ -404,7 +411,7 @@ export async function fetchNewLogsFromStreams(
  * Initial load: Get latest logs from the last 24 hours (or since startTime)
  */
 export async function fetchLatestLogs(
-  env: 'qa' | 'dev',
+  env: 'qa' | 'dev' | 'prod',
   appName: string,
   limit: number = 500,
   startTime?: number
@@ -413,7 +420,7 @@ export async function fetchLatestLogs(
   const logStreamPrefix = config?.logStreamPrefix || `ecs/${appName}`;
   const logGroupName = config?.logGroup || LOG_GROUPS[env];
 
-  return await withAutoRetry(async (client) => {
+  return await withAutoRetry(env, async (client) => {
     const allEvents = [];
     // Use provided startTime or default to last 7 days 
     // (24h was too strict for apps like RMX/PAM that might not log every day)
@@ -461,7 +468,7 @@ async function getLogGroupArn(client: CloudWatchLogsClient, logGroupName: string
  * Returns a cleanup function
  */
 export async function startLiveTail(
-  env: 'qa' | 'dev',
+  env: 'qa' | 'dev' | 'prod',
   appName: string,
   onEvent: (event: any) => void,
   onError: (err: any) => void,
@@ -477,7 +484,7 @@ export async function startLiveTail(
     // 1. Get ARN
     // This call uses withAutoRetry, which includes the "Smart Recovery" logic (clearing stale env vars).
     // So if auth fails here, it will clean up process.env before we create the streaming client.
-    const logGroupArn = await withAutoRetry(async (c) => getLogGroupArn(c, logGroupName));
+    const logGroupArn = await withAutoRetry<string | undefined>(env, async (c) => getLogGroupArn(c, logGroupName));
 
     if (!logGroupArn) {
       onError(new Error(`Log group ARN not found for ${logGroupName}`));
@@ -485,7 +492,7 @@ export async function startLiveTail(
     }
 
     // 2. Create client AFTER ARN check (so it picks up any env changes from withAutoRetry)
-    const client = await getClient();
+    const client = await getClient(env);
 
     // Remove :* suffix if present (sometimes ARN has it)
     const cleanArn = logGroupArn.endsWith(':*') ? logGroupArn.slice(0, -2) : logGroupArn;

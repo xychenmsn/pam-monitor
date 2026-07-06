@@ -5,7 +5,7 @@ import { useAppLogsManager, type AppLogsState } from '@/hooks/useAppLogsManager'
 interface LogViewerProps {
   appName: string
   appDisplayName: string
-  environment: 'qa' | 'dev'
+  environment: 'qa' | 'dev' | 'prod'
   initialStream?: string
   minimal?: boolean
 }
@@ -22,13 +22,15 @@ export default function LogViewer({ appName, appDisplayName, environment, initia
 
   // Helper to format timestamp
   const formatTime = (timestamp: number) => {
-    return new Date(timestamp).toLocaleTimeString('en-US', {
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      fractionalSecondDigits: 3,
-    })
+    const date = new Date(timestamp)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const year = date.getFullYear()
+    const month = pad(date.getMonth() + 1)
+    const day = pad(date.getDate())
+    const hours = pad(date.getHours())
+    const minutes = pad(date.getMinutes())
+    const seconds = pad(date.getSeconds())
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
   }
 
   // Clear all polling when environment changes

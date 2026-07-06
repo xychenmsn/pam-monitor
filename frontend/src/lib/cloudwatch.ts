@@ -23,7 +23,7 @@ export const API_BASE = 'http://localhost:31191';
 /**
  * Fetch available apps from backend API
  */
-export async function listApps(env: 'qa' | 'dev' = 'qa'): Promise<App[]> {
+export async function listApps(env: 'qa' | 'dev' | 'prod' = 'qa'): Promise<App[]> {
   const response = await fetch(`${API_BASE}/api/apps?env=${env}`);
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
@@ -38,7 +38,7 @@ export async function listApps(env: 'qa' | 'dev' = 'qa'): Promise<App[]> {
 /**
  * Fetch list of log streams sorted by recency (most recent first)
  */
-export async function getStreamList(env: 'qa' | 'dev', appName: string): Promise<string[]> {
+export async function getStreamList(env: 'qa' | 'dev' | 'prod', appName: string): Promise<string[]> {
   const response = await fetch(`${API_BASE}/api/logs/streams?app=${appName}&env=${env}`);
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
@@ -48,14 +48,14 @@ export async function getStreamList(env: 'qa' | 'dev', appName: string): Promise
     throw new Error(data.error || `Failed to fetch streams: ${response.statusText}`);
   }
   const data = await response.json();
-  return data; // Backend returns array directly or inside key? index.ts says "res.json(streams)" which is string[]
+  return data;
 }
 
 /**
  * Fetch logs using GetLogEvents (polling with tokens)
  */
 export async function getLogEvents(
-  env: 'qa' | 'dev',
+  env: 'qa' | 'dev' | 'prod',
   streamName: string,
   limit: number = 1000,
   startFromHead: boolean = false,
@@ -96,7 +96,7 @@ export interface AppDashboardStatus {
 /**
  * Fetch dashboard status (global scan)
  */
-export async function getDashboardStatus(env: 'qa' | 'dev'): Promise<AppDashboardStatus[]> {
+export async function getDashboardStatus(env: 'qa' | 'dev' | 'prod'): Promise<AppDashboardStatus[]> {
   const response = await fetch(`${API_BASE}/api/dashboard/status?env=${env}`);
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
@@ -107,6 +107,7 @@ export async function getDashboardStatus(env: 'qa' | 'dev'): Promise<AppDashboar
   }
   return response.json();
 }
+
 /**
  * Check if AWS credentials are valid across the whole app
  */
@@ -118,12 +119,17 @@ export async function checkAuth(): Promise<boolean> {
     return false;
   }
 }
+
 /**
  * Trigger the local AWS login script via backend
  */
-export async function triggerLogin(): Promise<boolean> {
+export async function triggerLogin(env: 'qa' | 'dev' | 'prod'): Promise<boolean> {
   try {
-    const response = await fetch(`${API_BASE}/api/auth/aws/login`, { method: 'POST' });
+    const response = await fetch(`${API_BASE}/api/auth/aws/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ env })
+    });
     if (!response.ok) return false;
     const data = await response.json();
     return data.success;

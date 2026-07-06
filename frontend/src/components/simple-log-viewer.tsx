@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils'
 interface SimpleLogViewerProps {
     appName: string
     appDisplayName: string
-    environment: 'qa' | 'dev'
+    environment: 'qa' | 'dev' | 'prod'
 }
 
 function ApiCallItem({ call }: { call: ApiCall }) {
@@ -20,7 +20,17 @@ function ApiCallItem({ call }: { call: ApiCall }) {
         error: 'text-red-500',
     }[call.status]
 
-    const time = new Date(call.timestamp).toLocaleTimeString()
+    const time = (() => {
+        const date = new Date(call.timestamp)
+        const pad = (n: number) => String(n).padStart(2, '0')
+        const year = date.getFullYear()
+        const month = pad(date.getMonth() + 1)
+        const day = pad(date.getDate())
+        const hours = pad(date.getHours())
+        const minutes = pad(date.getMinutes())
+        const seconds = pad(date.getSeconds())
+        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+    })()
 
     return (
         <div className="flex items-start gap-2 py-1 text-xs font-mono border-b border-border/50 last:border-0">
@@ -44,7 +54,7 @@ export default function SimpleLogViewer({ appName, appDisplayName, environment }
     const scrollRef = useRef<HTMLDivElement>(null)
     const previousLogCount = useRef(0)
     const currentAppRef = useRef<string>('')
-    const currentEnvRef = useRef<'qa' | 'dev'>('qa')
+    const currentEnvRef = useRef<'qa' | 'dev' | 'prod'>('qa')
 
     const {
         logs,

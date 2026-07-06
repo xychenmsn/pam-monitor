@@ -4,7 +4,7 @@ import { getDashboardStatus, type AppDashboardStatus } from '@/lib/cloudwatch'
 import { cn } from '@/lib/utils'
 
 interface DashboardProps {
-    environment: 'qa' | 'dev'
+    environment: 'qa' | 'dev' | 'prod'
     onAppSelect: (appName: string, initialStream?: string) => void
     isAuthError?: boolean
 }

@@ -34,12 +34,12 @@ export function useAppLogsManager() {
     })
   }, [])
 
-  const getAppKey = (appName: string, env: 'qa' | 'dev') => `${env}:${appName}`
+  const getAppKey = (appName: string, env: 'qa' | 'dev' | 'prod') => `${env}:${appName}`
 
   /**
    * Start Polling for an app
    */
-  const initializeApp = useCallback(async (appName: string, env: 'qa' | 'dev', initialStream?: string): Promise<void> => {
+  const initializeApp = useCallback(async (appName: string, env: 'qa' | 'dev' | 'prod', initialStream?: string): Promise<void> => {
     const key = getAppKey(appName, env)
 
     // Skip if already polling
@@ -139,7 +139,7 @@ export function useAppLogsManager() {
   }, [updateAppState])
 
 
-  const getAppLogs = useCallback((appName: string, env: 'qa' | 'dev'): AppLogsState => {
+  const getAppLogs = useCallback((appName: string, env: 'qa' | 'dev' | 'prod'): AppLogsState => {
     const key = getAppKey(appName, env)
     return appLogsMap.get(key) || {
       logs: [],
@@ -149,7 +149,7 @@ export function useAppLogsManager() {
     }
   }, [appLogsMap])
 
-  const clearAppLogs = useCallback((appName: string, env: 'qa' | 'dev') => {
+  const clearAppLogs = useCallback((appName: string, env: 'qa' | 'dev' | 'prod') => {
     const key = getAppKey(appName, env)
     const interval = intervalsRef.current.get(key)
     if (interval) {

@@ -57,7 +57,7 @@ export interface AppDetail {
     }[];
 }
 
-export async function getAppDetails(appName: string, env: 'qa' | 'dev'): Promise<AppDetail | null> {
+export async function getAppDetails(appName: string, env: 'qa' | 'dev' | 'prod'): Promise<AppDetail | null> {
     const apps = allApps[env] || [];
     const appConfig = apps.find((a: any) => a.name === appName || a.id === appName); // Match by ID or Name
 
@@ -103,7 +103,7 @@ export async function getAppDetails(appName: string, env: 'qa' | 'dev'): Promise
 
     return await withAwsRecovery(
         async (forceRefetch) => {
-            const ecs = await getECSClient(forceRefetch);
+            const ecs = await getECSClient(env, forceRefetch);
             let service: any = null;
             let tasks: any[] = [];
             let tdArn: string | undefined;
@@ -254,7 +254,7 @@ export async function getAppDetails(appName: string, env: 'qa' | 'dev'): Promise
 /**
  * Trigger a force new deployment for a service
  */
-export async function restartService(appName: string, env: 'qa' | 'dev'): Promise<boolean> {
+export async function restartService(appName: string, env: 'qa' | 'dev' | 'prod'): Promise<boolean> {
     const apps = allApps[env] || [];
     const appConfig = apps.find((a: any) => a.name === appName || a.id === appName);
 
@@ -269,7 +269,7 @@ export async function restartService(appName: string, env: 'qa' | 'dev'): Promis
     if (appConfig.isScheduledTask) {
         return await withAwsRecovery(
             async (forceRefetch) => {
-                const ecs = await getECSClient(forceRefetch);
+                const ecs = await getECSClient(env, forceRefetch);
 
                 // 1. Find all running tasks for this family
                 const listCmd = new ListTasksCommand({
@@ -303,7 +303,7 @@ export async function restartService(appName: string, env: 'qa' | 'dev'): Promis
 
     return await withAwsRecovery(
         async (forceRefetch) => {
-            const ecs = await getECSClient(forceRefetch);
+            const ecs = await getECSClient(env, forceRefetch);
 
             const command = new UpdateServiceCommand({
                 cluster: appConfig.cluster,

@@ -171,5 +171,131 @@
             "logStreamPrefix": "rabbit@localhost_general.log",
             "isScheduledTask": true
         }
-    ]
+    ],
+    "prod": [
+        {
+            "id": "pam-sms",
+            "name": "PAM (SMS)",
+            "logGroup": "custom-apps-pam-cloudwatch-prod",
+            "logStreamPrefix": "ecs/pamprod",
+            "cluster": "ecs-custom-apps-pam-prod",
+            "service": "pamprod-service"
+        },
+        {
+            "id": "rmx",
+            "name": "RMX (Resquared)",
+            "logGroup": "custom-apps-pam-cloudwatch-prod",
+            "logStreamPrefix": "ecs/rmxprod",
+            "cluster": "ecs-custom-apps-pam-prod",
+            "service": "rmxprod-service"
+        },
+        {
+            "id": "pam-api",
+            "name": "PAM API",
+            "logGroup": "custom-apps-pam-cloudwatch-prod",
+            "logStreamPrefix": "ecs/pamapiprod",
+            "cluster": "ecs-custom-apps-pam-prod",
+            "service": "pamapiprod-service"
+        },
+        {
+            "id": "pam-api-worker",
+            "name": "PAM API Worker (pamapi-worker)",
+            "logGroup": "custom-apps-pam-cloudwatch-prod",
+            "logStreamPrefix": "ecs/pamapiprod-worker",
+            "cluster": "ecs-custom-apps-pam-prod",
+            "service": "pamapiprod-worker-service"
+        },
+        {
+            "id": "tad",
+            "name": "TAD",
+            "logGroup": "custom-apps-pam-cloudwatch-prod",
+            "logStreamPrefix": "ecs/tadprod",
+            "cluster": "ecs-custom-apps-pam-prod",
+            "service": "tadprod-service"
+        },
+        {
+            "id": "remora",
+            "name": "PAM Admin (Remora)",
+            "logGroup": "custom-apps-pam-cloudwatch-prod",
+            "logStreamPrefix": "ecs/pamadminprod",
+            "cluster": "ecs-custom-apps-pam-prod",
+            "service": "pamadminprod-service"
+        },
+        {
+            "id": "psi",
+            "name": "PSI",
+            "logGroup": "custom-apps-pam-cloudwatch-prod",
+            "logStreamPrefix": "ecs/psiprod",
+            "cluster": "ecs-custom-apps-pam-prod",
+            "service": "psiprod",
+            "isScheduledTask": true,
+            "taskFamily": "psiprod-task-family",
+            "schedulerRule": "psiprod-task-scheduler"
+        },
+        {
+            "id": "ag-admin",
+            "name": "Gateway Admin (ag-admin)",
+            "logGroup": "custom-apps-pam-cloudwatch-prod",
+            "logStreamPrefix": "ecs/gatewayadminprod",
+            "cluster": "ecs-custom-apps-pam-prod",
+            "service": "gatewayadminprod-service"
+        },
+        {
+            "id": "agency-gateway-api",
+            "name": "Agency Gateway API (pammanagement)",
+            "logGroup": "custom-apps-pam-cloudwatch-prod",
+            "logStreamPrefix": "ecs/pammanagementprod",
+            "cluster": "ecs-custom-apps-pam-prod",
+            "service": "pammanagementprod-service"
+        },
+        {
+            "id": "gateway-worker",
+            "name": "Agency Gateway Worker (gateway-worker)",
+            "logGroup": "custom-apps-pam-external-cloudwatch-prod",
+            "logStreamPrefix": "ecs/gatewayapiprod-worker",
+            "cluster": "ecs-custom-apps-pam-external-prod",
+            "service": "gatewayapiprod-worker-service"
+        },
+        {
+            "id": "rabbitmq",
+            "name": "RabbitMQ Broker",
+            "logGroup": "/aws/amazonmq/broker/b-bf8ae604-5b4f-4bd9-bc9b-988cbc620954/general",
+            "logStreamPrefix": "rabbit@localhost_general.log",
+            "isScheduledTask": true
+        }
+    ],
+    "databases": {
+        "qa": [
+            {
+                "id": "agency-gateway-db",
+                "name": "Agency Gateway DB",
+                "host": "qa-mariadb.customapps.nonprod.adsalescloud.inbcu.com",
+                "database": "agqa",
+                "user": "agguser_qa",
+                "password": "ag_guser_qa_22",
+                "port": 1521
+            }
+        ],
+        "dev": [
+            {
+                "id": "agency-gateway-db",
+                "name": "Agency Gateway DB",
+                "host": "127.0.0.1",
+                "database": "agency_gateway_development",
+                "user": "root",
+                "password": ""
+            }
+        ],
+        "prod": [
+            {
+                "id": "agency-gateway-db",
+                "name": "Agency Gateway DB",
+                "host": "mariadb.customapps.prod.adsalescloud.inbcu.com",
+                "database": "agprod",
+                "user": "agguser",
+                "password": "ag_guser_22",
+                "port": 1521
+            }
+        ]
+    }
 }

@@ -1,6 +1,6 @@
 import { DescribeLogStreamsCommand } from '@aws-sdk/client-cloudwatch-logs';
 import { DescribeServicesCommand, ListTasksCommand } from '@aws-sdk/client-ecs';
-import { withAutoRetry, getClient, getECSClient } from './cloudwatch.js';
+import { withAutoRetry, getECSClient } from './cloudwatch.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -41,7 +41,7 @@ interface AppDashboardStatus {
 const configPath = path.join(__dirname, '../config/applications.json');
 const allApps: Record<string, AppConfig[]> = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 
-export async function getDashboardStatus(env: 'qa' | 'dev' = 'qa'): Promise<AppDashboardStatus[]> {
+export async function getDashboardStatus(env: 'qa' | 'dev' | 'prod'): Promise<AppDashboardStatus[]> {
     const apps = allApps[env] || [];
     if (apps.length === 0) return [];
 
@@ -60,8 +60,8 @@ export async function getDashboardStatus(env: 'qa' | 'dev' = 'qa'): Promise<AppD
     const ecsStatusMap = new Map<string, any>();
 
     try {
-        await withAutoRetry(async () => {
-            const ecs = await getECSClient();
+        await withAutoRetry(env, async () => {
+            const ecs = await getECSClient(env);
             for (const [cluster, services] of servicesByCluster.entries()) {
                 const command = new DescribeServicesCommand({
                     cluster,
@@ -86,12 +86,12 @@ export async function getDashboardStatus(env: 'qa' | 'dev' = 'qa'): Promise<AppD
         const ecsSvc = ecsStatusMap.get(app.service);
 
         try {
-            await withAutoRetry(async (cw) => {
+            await withAutoRetry(env, async (cw) => {
                 // Determine active streams via ECS tasks directly (Fast and accurate)
                 // AppConfig has cluster and service. ECS status was eagerly fetched above.
                 if (ecsSvc && ecsSvc.runningCount > 0 && !app.isScheduledTask) {
                     try {
-                        const ecs = await getECSClient();
+                        const ecs = await getECSClient(env);
                         const listCmd = new ListTasksCommand({
                             cluster: app.cluster,
                             serviceName: app.service,

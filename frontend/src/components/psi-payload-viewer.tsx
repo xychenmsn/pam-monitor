@@ -16,7 +16,7 @@ interface FileTree {
 
 interface PsiPayloadViewerProps {
     appName: string;
-    environment: 'qa' | 'dev';
+    environment: 'qa' | 'dev' | 'prod';
 }
 
 export default function PsiPayloadViewer({ appName, environment }: PsiPayloadViewerProps) {

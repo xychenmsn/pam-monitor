@@ -9,12 +9,15 @@ export interface PsiPayloadFile {
     size: number;
 }
 
-export async function listPsiPayloads(env: 'qa' | 'dev'): Promise<PsiPayloadFile[]> {
+export async function listPsiPayloads(env: 'qa' | 'dev' | 'prod'): Promise<PsiPayloadFile[]> {
+    // S3 payload operations will exclusively use nonprod credentials because the shared 
+    // payload configuration bucket (adsales-appdev-config) resides in the non-prod account.
+    const authEnv = 'dev'; 
     return withAwsRecovery(
         async (forceRefetch) => {
             const s3 = new S3Client({
                 region: 'us-east-1',
-                credentials: getCredentialProvider(forceRefetch)
+                credentials: getCredentialProvider(authEnv, forceRefetch)
             });
             const prefix = `psi/last_updated/${env}/tmp/`;
 
@@ -63,11 +66,12 @@ export async function listPsiPayloads(env: 'qa' | 'dev'): Promise<PsiPayloadFile
 }
 
 export async function getPsiPayloadContent(key: string): Promise<string> {
+    const authEnv = 'dev';
     return withAwsRecovery(
         async (forceRefetch) => {
             const s3 = new S3Client({
                 region: 'us-east-1',
-                credentials: getCredentialProvider(forceRefetch)
+                credentials: getCredentialProvider(authEnv, forceRefetch)
             });
 
             const command = new GetObjectCommand({
