@@ -111,9 +111,9 @@ export async function getDashboardStatus(env: 'qa' | 'dev' | 'prod'): Promise<Ap
 /**
  * Check if AWS credentials are valid across the whole app
  */
-export async function checkAuth(): Promise<boolean> {
+export async function checkAuth(env: 'qa' | 'dev' | 'prod'): Promise<boolean> {
   try {
-    const response = await fetch(`${API_BASE}/api/auth/aws/status`);
+    const response = await fetch(`${API_BASE}/api/auth/aws/status?env=${env}`);
     return response.ok;
   } catch (error) {
     return false;

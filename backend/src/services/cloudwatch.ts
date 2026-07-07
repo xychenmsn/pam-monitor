@@ -137,19 +137,16 @@ export function getAppConfig(env: 'qa' | 'dev' | 'prod', identifier: string) {
 }
 
 /**
- * Check if AWS credentials are valid
+ * Check if AWS credentials are valid for a specific environment
  */
-export async function checkAuth(): Promise<boolean> {
+export async function checkAuth(env: 'qa' | 'dev' | 'prod'): Promise<boolean> {
   try {
-    await withAutoRetry('qa', async (client: CloudWatchLogsClient) => {
-      await client.send(new DescribeLogGroupsCommand({ limit: 1 }));
-    });
-    await withAutoRetry('prod', async (client: CloudWatchLogsClient) => {
+    await withAutoRetry(env, async (client: CloudWatchLogsClient) => {
       await client.send(new DescribeLogGroupsCommand({ limit: 1 }));
     });
     return true;
   } catch (error) {
-    console.error('Auth check failed:', error);
+    console.error(`Auth check failed for ${env}:`, error);
     invalidateClients();
     return false;
   }

@@ -8,8 +8,7 @@ import Sidebar from './components/sidebar'
 import Dashboard from './components/dashboard'
 import AppDetailView from './components/app-detail-view'
 import DbExplorer from './components/db-explorer'
-import RobustAuthDialog from './components/robust-auth-dialog'
-import { useAuthHeartbeat } from './hooks/useAuthHeartbeat'
+import { useConnectionStatus } from './hooks/useAuthHeartbeat'
 
 // Shell wraps the layout (navbar + sidebar) and renders route children
 function Shell() {
@@ -18,8 +17,7 @@ function Shell() {
   const [loading, setLoading] = useState(true)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
-  const { isAuthError, check: retryAuth } = useAuthHeartbeat(30000)
-  const [manualAuthOpen, setManualAuthOpen] = useState(false)
+  const { statuses, check: checkConnection, connect: connectAws, setDisconnected } = useConnectionStatus()
   const navigate = useNavigate()
   const location = useLocation()
   const { appId } = useParams<{ appId?: string }>()
@@ -48,12 +46,15 @@ function Shell() {
       ])
       setApps(appsData)
       setDatabases(dbsData)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching dashboard data:', error)
+      if (error?.name === 'AuthError' || error?.message?.includes('credentials')) {
+        setDisconnected(environment)
+      }
     } finally {
       setLoading(false)
     }
-  }, [environment])
+  }, [environment, setDisconnected])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -67,69 +68,64 @@ function Shell() {
     navigate(`/database/${dbId}?env=${environment}`)
   }
 
+  const isAuthError = statuses[environment] === 'disconnected'
+
   return (
-    <>
-      <RobustAuthDialog
-        isOpen={isAuthError || manualAuthOpen}
+    <div className="flex h-screen flex-col bg-background text-foreground">
+      <Navbar
         environment={environment}
-        onRetry={retryAuth}
-        onClose={() => setManualAuthOpen(false)}
-        isManual={manualAuthOpen && !isAuthError}
+        onEnvironmentChange={setEnvironment}
+        onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+        connectionStatus={statuses[environment]}
+        onCheckConnection={() => checkConnection(environment)}
+        onConnect={() => connectAws(environment)}
       />
-      <div className="flex h-screen flex-col bg-background text-foreground">
-        <Navbar
-          environment={environment}
-          onEnvironmentChange={setEnvironment}
-          onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
-          onReconnectClick={() => setManualAuthOpen(true)}
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar
+          apps={apps}
+          selectedApp={appId || ''}
+          onAppSelect={(name) => handleAppSelect(name)}
+          databases={databases}
+          selectedDb={selectedDbId}
+          onDbSelect={handleDbSelect}
+          collapsed={sidebarCollapsed}
+          loading={loading}
         />
-        <div className="flex flex-1 overflow-hidden">
-          <Sidebar
-            apps={apps}
-            selectedApp={appId || ''}
-            onAppSelect={(name) => handleAppSelect(name)}
-            databases={databases}
-            selectedDb={selectedDbId}
-            onDbSelect={handleDbSelect}
-            collapsed={sidebarCollapsed}
-            loading={loading}
-          />
-          <main className={cn('flex-1 overflow-hidden', sidebarCollapsed ? 'ml-16' : 'ml-64')}>
-            <Routes>
-              <Route
-                path="/"
-                element={
-                  <Dashboard
-                    environment={environment}
-                    onAppSelect={handleAppSelect}
-                    isAuthError={isAuthError}
-                  />
-                }
-              />
-              <Route
-                path="/app/:appId/:tab?"
-                element={
-                  <AppDetailViewRoute
-                    environment={environment}
-                    isAuthError={isAuthError}
-                  />
-                }
-              />
-              <Route
-                path="/database/:dbId"
-                element={
-                  <DbExplorerRoute
-                    environment={environment}
-                  />
-                }
-              />
-              {/* Catch-all → home */}
-              <Route path="*" element={<Navigate to={`/?env=${environment}`} replace />} />
-            </Routes>
-          </main>
-        </div>
+        <main className={cn('flex-1 overflow-hidden', sidebarCollapsed ? 'ml-16' : 'ml-64')}>
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <Dashboard
+                  environment={environment}
+                  onAppSelect={handleAppSelect}
+                  isAuthError={isAuthError}
+                />
+              }
+            />
+            <Route
+              path="/app/:appId/:tab?"
+              element={
+                <AppDetailViewRoute
+                  environment={environment}
+                  isAuthError={isAuthError}
+                />
+              }
+            />
+            <Route
+              path="/database/:dbId"
+              element={
+                <DbExplorerRoute
+                  environment={environment}
+                />
+              }
+            />
+            {/* Catch-all → home */}
+            <Route path="*" element={<Navigate to={`/?env=${environment}`} replace />} />
+          </Routes>
+        </main>
       </div>
-    </>
+    </div>
   )
 }
 

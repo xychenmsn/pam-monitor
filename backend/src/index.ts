@@ -50,7 +50,8 @@ app.get('/api/auth/aws/status', async (req, res) => {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
 
-  const isValid = await cloudwatch.checkAuth();
+  const env = parseEnv(req.query.env);
+  const isValid = await cloudwatch.checkAuth(env);
   if (isValid) {
     res.json({ authenticated: true, sessionId: SESSION_ID });
   } else {
